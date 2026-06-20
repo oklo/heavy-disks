@@ -84,3 +84,8 @@ cd diskfft && make && ./diskdisk 256 256 0.005 16 1 1e-3 8
 ```
 
 Dependencies: `numpy`, `scipy`, `sympy`, `matplotlib`, `pytest`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Note this covers the code only; the reproduced ApJ
+articles remain under AAS/IOP copyright and are not redistributed here.
