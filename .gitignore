@@ -13,9 +13,16 @@ __pycache__/
 # Journal paper PDFs and page scans (AAS/IOP copyright) — excluded
 paper/
 lka98/paper/
+lb94/paper/
+*.pdf
 
 # Compiled binaries / run outputs
 diskfft/diskdisk
 diskfft/test_kalnajs
+lb94/collapse
+lb94/collapse_nested
+lb94/test_poisson
+lb94/test_freefall
+lb94/test_nested
 *.o
 *.dat
