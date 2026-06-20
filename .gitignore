@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# macOS / editor
+.DS_Store
+
+# Local agent config
+.claude/
+
+# Journal paper PDFs and page scans (AAS/IOP copyright) — excluded
+paper/
+lka98/paper/
+
+# Compiled binaries / run outputs
+diskfft/diskdisk
+diskfft/test_kalnajs
+*.o
+*.dat
