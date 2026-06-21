@@ -206,19 +206,6 @@ struct NestedHydro {
     return m;
   }
 
-  // Correct the small per-step interface leak (no refluxing yet) by renormalizing the gas
-  // mass to (m0 - M_c).  Scales rho, momenta, A, e together -> velocities, T, Omega unchanged.
-  // (Berger-Colella refluxing is the proper conservative fix.)
-  void conserve_mass(double m0) {
-    double gas = gas_mass(), target = m0 - finest().M_c;
-    if (gas <= 0 || target <= 0) return;
-    double f = target / gas;
-    for (auto& h : lev)
-      for (int c = 0; c < NR * NZ; ++c) {
-        h.rho[c] *= f; h.sR[c] *= f; h.sZ[c] *= f; h.A[c] *= f; h.e[c] *= f;
-      }
-  }
-
   void step(double dt) {
     double Mc = finest().M_c, Jc = finest().J_c;        // shared central core
     double ms = debug_mass ? composite_mass() + Mc : 0; // before restrict/gravity/prolong
