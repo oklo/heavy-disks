@@ -35,6 +35,9 @@ int main() {
     h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
     h.vmax = 1.0e7;                                      // 100 km/s velocity ceiling (no mass loss)
     h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
+    h.floor = rho_mean * 1e-3;                           // ~500x below cloud density: stable van Leer
+                                                         // advection (much lower -> negative-rho
+                                                         // overshoot at the steep cloud/vacuum edge)
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
   nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
@@ -93,9 +96,11 @@ int main() {
         if (d > 10.0 * rho_mean) Rout = f.R[i];
         if (f.R[i] > f.R_sink && d > rpk) { rpk = d; Tdisk = f.e[f.idx(i, 0)] / (d * cv); }
       }
+      double floored = 0;                               // fictitious mass added by the vacuum floor
+      for (auto& h : nh.lev) floored += h.dbg_mass_floored;
       printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f      %.0f\n",
              t / yr, t / t_ff, nh.finest().M_c / Msun, gas_mass() / Msun,
-             (gas_mass() + nh.finest().M_c) / m0, Rout / AU, Tdisk);
+             (gas_mass() + nh.finest().M_c - floored) / m0, Rout / AU, Tdisk);
       fflush(stdout); nextlog += 0.5e4 * yr;
     }
   }
@@ -105,7 +110,11 @@ int main() {
     for (int j = 0; j < NZ; ++j)
       fprintf(fp, "%.4e %.4e %.6e\n", f.R[i] / AU, f.Z[j] / AU, f.rho[f.idx(i, j)]);
   fclose(fp);
+  double floored = 0;
+  for (auto& h : nh.lev) floored += h.dbg_mass_floored;
   printf("\nfinal: M_core=%.3f Msun (%.0f%%) at t=%.0f yr,  steps=%d\n",
          nh.finest().M_c / Msun, 100 * nh.finest().M_c / m0, t / yr, nstep);
+  printf("       cumulative mass added by density floor = %.4f Msun (%.2f%% of m0)\n",
+         floored / Msun, 100 * floored / m0);
   return 0;
 }

@@ -32,6 +32,7 @@ struct Hydro {
   // barotropic EOS: P = cs2 * rho  (rho < rho_crit);  P = cs2*rho_crit*(rho/rho_crit)^gam above
   double cs2, rho_crit, gam;
   double floor = 1e-20;
+  double dbg_mass_floored = 0;         // cumulative mass added by the density floor (diagnostic)
   double rho_active = 1e-3;            // below this a cell is "vacuum": carries no momentum
   inline double vdiv(double d) const { return std::max(d, rho_active); }
 
@@ -266,7 +267,10 @@ struct Hydro {
     }
     // floor/clamp density and clear momentum in vacuum cells
     for (int c = 0; c < NR * NZ; ++c) {
-      if (rho[c] < floor) rho[c] = floor;
+      if (rho[c] < floor) {
+        dbg_mass_floored += (floor - rho[c]) * 2.0 * (2.0 * PI * R[c / NZ] * dR * dZ);
+        rho[c] = floor;
+      }
       if (rho[c] > rho_max) {                              // clamp (keep velocity/T)
         double f = rho_max / rho[c]; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f; rho[c] = rho_max;
       }
