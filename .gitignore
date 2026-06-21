@@ -27,3 +27,4 @@ lb94/test_nested
 *.o
 *.dat
 lb94/collapse_ybl
+lb94/test_sedov

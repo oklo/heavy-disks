@@ -18,6 +18,9 @@ struct Hydro {
   double dR, dZ, G;
   std::vector<double> R, Z;
   std::vector<double> rho, sR, sZ, A, Phi;
+  std::vector<double> e;              // internal energy density (when use_energy)
+  bool use_energy = false;           // false: barotropic EOS; true: ideal gas with energy eq
+  double emin = 1e-300;
   // nested-grid ghost state at the outer R and Z boundaries ([rho,sR,sZ,A] each)
   bool ghostBC = false;
   std::vector<std::vector<double>> ghostR{4}, ghostZ{4};
@@ -35,6 +38,7 @@ struct Hydro {
     R = poisson.R; Z = poisson.Z;
     size_t n = (size_t)NR * NZ;
     rho.assign(n, floor); sR.assign(n, 0); sZ.assign(n, 0); A.assign(n, 0); Phi.assign(n, 0);
+    e.assign(n, 0.0);
     for (int k = 0; k < 4; ++k) { ghostR[k].assign(NZ, 0.0); ghostZ[k].assign(NR, 0.0); }
   }
   double Cq = 1.4;                    // von Neumann artificial-viscosity coefficient (R85)
@@ -54,6 +58,12 @@ struct Hydro {
   inline double csound(double d) const {
     return (d < rho_crit) ? std::sqrt(cs2) : std::sqrt(gam * pres(d) / d);
   }
+  // pressure / sound speed per cell (ideal gas P=(gam-1)e when use_energy, else barotropic)
+  inline double Pcell(int c) const { return use_energy ? (gam - 1.0) * e[c] : pres(rho[c]); }
+  inline double cs_cell(int c) const {
+    return use_energy ? std::sqrt(gam * std::max((gam - 1.0) * e[c], 0.0) / vdiv(rho[c]))
+                      : csound(rho[c]);
+  }
 
   double timestep(double cfl) const {
     double dtinv = 1e-300;
@@ -61,7 +71,7 @@ struct Hydro {
       for (int j = 0; j < NZ; ++j) {
         double d = rho[idx(i, j)];
         if (d < rho_active) continue;                 // ignore vacuum cells
-        double cs = csound(d);
+        double cs = cs_cell(idx(i, j));
         double vr = std::fabs(sR[idx(i, j)] / d), vz = std::fabs(sZ[idx(i, j)] / d);
         double Om = std::fabs(A[idx(i, j)] / (d * R[i] * R[i]));   // angular frequency v_phi/R
         double wff = std::sqrt(4.0 * PI * G * d);                  // local free-fall rate
@@ -90,11 +100,12 @@ struct Hydro {
       }
   }
 
-  // --- source: pressure(+artificial viscosity) gradient, gravity, centrifugal ---
+  // --- source: pressure(+artificial viscosity) gradient, gravity, centrifugal,
+  //     and (use_energy) the compression + artificial-viscosity heating of e ---
   void source(double dt) {
-    std::vector<double> nsR = sR, nsZ = sZ, Q;
+    std::vector<double> nsR = sR, nsZ = sZ, ne = e, Q;
     avisc_pressure(Q);
-    auto Peff = [&](int i, int j) { return pres(rho[idx(i, j)]) + Q[idx(i, j)]; };
+    auto Peff = [&](int i, int j) { return Pcell(idx(i, j)) + Q[idx(i, j)]; };
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) {
         int c = idx(i, j);
@@ -114,8 +125,16 @@ struct Hydro {
         }
         nsR[c] += dt * (-dPdR - d * dPhidR + d * gcR + d * vphi * vphi / R[i]);
         nsZ[c] += dt * (-dPdZ - d * dPhidZ + d * gcZ);
+        if (use_energy) {                                     // de = -(P+q) div(v) dt
+          double vRp = sR[idx(ip, j)] / vdiv(rho[idx(ip, j)]), vRm = sR[idx(im, j)] / vdiv(rho[idx(im, j)]);
+          double vZp = sZ[idx(i, jp)] / vdiv(rho[idx(i, jp)]), vZm = sZ[idx(i, jm)] / vdiv(rho[idx(i, jm)]);
+          double divv = (vRp - vRm) / ((ip - im) * dR) + (sR[c] / vdiv(d)) / R[i]
+                      + (vZp - vZm) / ((jp - jm) * dZ);
+          ne[c] = std::max(e[c] - (Pcell(c) + Q[c]) * divv * dt, emin);
+        }
       }
     sR.swap(nsR); sZ.swap(nsZ);
+    if (use_energy) e.swap(ne);
   }
 
   // density-based sink: any cell above rho_ceiling (the Truelove-unresolved gas, i.e. the
@@ -138,7 +157,10 @@ struct Hydro {
 
   // van Leer 2nd-order conservative transport (R then Z), face velocities fixed per sweep
   void transport(double dt) {
-    std::vector<double>* q[4] = {&rho, &sR, &sZ, &A};
+    std::vector<double>* q[5] = {&rho, &sR, &sZ, &A, &e};
+    int nq = use_energy ? 5 : 4;
+    auto ghR = [&](int k, int j) { return k < 4 ? ghostR[k][j] : e[idx(NR - 1, j)]; };
+    auto ghZ = [&](int k, int i) { return k < 4 ? ghostZ[k][i] : e[idx(i, NZ - 1)]; };
 
     // R-sweep:  d_t q + (1/R) d_R(R q v_R) = 0
     std::vector<double> vc((size_t)NR * NZ);
@@ -147,7 +169,7 @@ struct Hydro {
     if (ghostBC)
       for (int j = 0; j < NZ; ++j)
         vgR[j] = 0.5 * (vc[idx(NR - 1, j)] + ghostR[1][j] / vdiv(ghostR[0][j]));
-    for (int k = 0; k < 4; ++k) {
+    for (int k = 0; k < nq; ++k) {
       std::vector<double>& Q = *q[k];
       std::vector<double> nQ = Q;
       for (int j = 0; j < NZ; ++j) {
@@ -168,7 +190,7 @@ struct Hydro {
         }
         if (ghostBC) {
           double vf = vgR[j];
-          double qf = (vf > 0) ? Q[idx(NR - 1, j)] : ghostR[k][j];   // inflow from parent
+          double qf = (vf > 0) ? Q[idx(NR - 1, j)] : ghR(k, j);      // inflow from parent
           F[NR] = NR * dR * vf * qf;
         } else
           F[NR] = NR * dR * std::max(vc[idx(NR - 1, j)], 0.0) * Q[idx(NR - 1, j)];
@@ -183,7 +205,7 @@ struct Hydro {
     if (ghostBC)
       for (int i = 0; i < NR; ++i)
         vgZ[i] = 0.5 * (vc[idx(i, NZ - 1)] + ghostZ[2][i] / vdiv(ghostZ[0][i]));
-    for (int k = 0; k < 4; ++k) {
+    for (int k = 0; k < nq; ++k) {
       std::vector<double>& Q = *q[k];
       std::vector<double> nQ = Q;
       for (int i = 0; i < NR; ++i) {
@@ -205,7 +227,7 @@ struct Hydro {
         F[0] = 0.0;                                            // midplane reflect: no flux
         if (ghostBC) {
           double vf = vgZ[i];
-          double qf = (vf > 0) ? Q[idx(i, NZ - 1)] : ghostZ[k][i];
+          double qf = (vf > 0) ? Q[idx(i, NZ - 1)] : ghZ(k, i);
           F[NZ] = vf * qf;
         } else
           F[NZ] = std::max(vc[idx(i, NZ - 1)], 0.0) * Q[idx(i, NZ - 1)];  // outflow
@@ -221,6 +243,7 @@ struct Hydro {
         double f = rho_max / rho[c]; sR[c] *= f; sZ[c] *= f; A[c] *= f; rho[c] = rho_max;
       }
       if (rho[c] < rho_active) { sR[c] = sZ[c] = A[c] = 0.0; }
+      if (use_energy && e[c] < emin) e[c] = emin;
     }
   }
 
