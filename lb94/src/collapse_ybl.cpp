@@ -18,7 +18,7 @@ int main() {
   const double Tgas = 20.0, Omega0 = 4.4e-13;
   const double cs2 = kB * Tgas / (mu * mH);              // isothermal sound speed^2
   const double rho_crit = 1.0e-13, gam = 1.4;            // barotropic (first core)
-  const int NR = 60, NZ = 60, nlev = 4;
+  const int NR = 60, NZ = 60, nlev = 5;                   // finest dR ~5.6 AU (was 11 AU at nlev=4)
   const double L = 2.0 * Rcloud;                         // box >> cloud: cloud well inside the
                                                          // coarsest grid, disk inside the finest
 
