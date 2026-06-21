@@ -23,6 +23,7 @@ struct Hydro {
   double emin = 1e-300;
   // nested-grid ghost state at the outer R and Z boundaries ([rho,sR,sZ,A] each)
   bool ghostBC = false;
+  bool closed_outer = false;          // closed (zero-flux) outer boundary instead of outflow
   std::vector<std::vector<double>> ghostR{4}, ghostZ{4};
   // Berger-Colella refluxing: saved transport fluxes at the outer boundary (this grid as
   // the FINE child) and at the mid faces NR/2, NZ/2 (this grid as the COARSE parent).
@@ -215,8 +216,9 @@ struct Hydro {
           double vf = vgR[j];
           double qf = (vf > 0) ? Q[idx(NR - 1, j)] : ghR(k, j);      // inflow from parent
           F[NR] = NR * dR * vf * qf;
-        } else
+        } else if (!closed_outer)
           F[NR] = NR * dR * std::max(vc[idx(NR - 1, j)], 0.0) * Q[idx(NR - 1, j)];
+        // closed_outer: F[NR] stays 0 (no flux through the outer boundary)
         fluxR_out[k][j] = F[NR]; fluxR_mid[k][j] = F[NR / 2];   // save for refluxing
         for (int i = 0; i < NR; ++i)
           nQ[idx(i, j)] -= dt / (R[i] * dR) * (F[i + 1] - F[i]);
@@ -253,8 +255,9 @@ struct Hydro {
           double vf = vgZ[i];
           double qf = (vf > 0) ? Q[idx(i, NZ - 1)] : ghZ(k, i);
           F[NZ] = vf * qf;
-        } else
+        } else if (!closed_outer)
           F[NZ] = std::max(vc[idx(i, NZ - 1)], 0.0) * Q[idx(i, NZ - 1)];  // outflow
+        // closed_outer: F[NZ] stays 0
         fluxZ_out[k][i] = F[NZ]; fluxZ_mid[k][i] = F[NZ / 2];   // save for refluxing
         for (int j = 0; j < NZ; ++j)
           nQ[idx(i, j)] -= dt / dZ * (F[j + 1] - F[j]);

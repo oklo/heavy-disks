@@ -29,6 +29,7 @@ int main() {
   const double Rkep = j_out * j_out / (G * Mtot);
 
   NestedHydro nh(nlev, NR, NZ, L, G, cs2, rho_crit, gam);
+  nh.lev[0].closed_outer = true;        // the bound cloud cannot lose mass through the box edge
   double dRfine = nh.finest().dR;
   for (auto& h : nh.lev) {
     h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
@@ -95,8 +96,6 @@ int main() {
       printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f      %.0f\n",
              t / yr, t / t_ff, nh.finest().M_c / Msun, gas_mass() / Msun,
              (gas_mass() + nh.finest().M_c) / m0, Rout / AU, Tdisk);
-      fprintf(stderr, "   cumulative loss: level-steps %.4f, reflux %.4f (of m0)\n",
-              nh.dloss_levels / m0, nh.dloss_reflux / m0);
       fflush(stdout); nextlog += 0.5e4 * yr;
     }
   }

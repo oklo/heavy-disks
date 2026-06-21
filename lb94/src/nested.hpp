@@ -78,7 +78,8 @@ struct NestedHydro {
   double L, G;
   bool freeze_overlap = false;                     // freeze coarse overlap (non-conservative)
   bool debug_mass = false;                         // accumulate per-phase mass change
-  double dloss_levels = 0, dloss_reflux = 0;
+  double dloss_levels = 0, dloss_reflux = 0, dbg_ghost_in = 0, dbg_reflux_added = 0, dloss_gap = 0;
+  double dbg_prev_m = -1;
   std::vector<Hydro> lev;                          // 0 coarsest ... nlev-1 finest
 
   NestedHydro(int nlev_, int NR_, int NZ_, double L_, double G_,
@@ -132,6 +133,12 @@ struct NestedHydro {
   // (area-weighted) sum of the fine sub-face fluxes so mass/momentum/energy are conserved
   // exactly across the interface.  (Synchronous stepping -> single dt, no subcycle sum.)
   void reflux(double dt) {
+    if (debug_mass)                                // mass crossing each fine grid's boundary (k=0)
+      for (int l = 1; l < nlev; ++l) {
+        Hydro& f = lev[l];
+        for (int j = 0; j < NZ; ++j) dbg_ghost_in += -dt * 4 * PI * f.dZ * f.fluxR_out[0][j];
+        for (int i = 0; i < NR; ++i) dbg_ghost_in += -dt * 4 * PI * f.R[i] * f.dR * f.fluxZ_out[0][i];
+      }
     for (int l = 1; l < nlev; ++l) {
       Hydro& f = lev[l]; Hydro& c = lev[l - 1];
       int nq = f.use_energy ? 5 : 4;
@@ -139,13 +146,19 @@ struct NestedHydro {
       for (int jc = 0; jc < NZ / 2; ++jc)        // R-interface: coarse cell (NR/2, jc)
         for (int k = 0; k < nq; ++k) {
           double Ffine = 0.5 * (f.fluxR_out[k][2 * jc] + f.fluxR_out[k][2 * jc + 1]);
-          (*cU[k])[c.idx(NR / 2, jc)] += dt / (c.R[NR / 2] * c.dR) * (Ffine - c.fluxR_mid[k][jc]);
+          double corr = dt / (c.R[NR / 2] * c.dR) * (Ffine - c.fluxR_mid[k][jc]);
+          (*cU[k])[c.idx(NR / 2, jc)] += corr;
+          if (debug_mass && k == 0)
+            dbg_reflux_added += corr * 2 * (2 * PI * c.R[NR / 2] * c.dR * c.dZ);
         }
       for (int ic = 0; ic < NR / 2; ++ic)        // Z-interface: coarse cell (ic, NZ/2)
         for (int k = 0; k < nq; ++k) {
           double Ffine = (f.R[2 * ic] * f.fluxZ_out[k][2 * ic] +
                           f.R[2 * ic + 1] * f.fluxZ_out[k][2 * ic + 1]) / (2.0 * c.R[ic]);
-          (*cU[k])[c.idx(ic, NZ / 2)] += dt / c.dZ * (Ffine - c.fluxZ_mid[k][ic]);
+          double corr = dt / c.dZ * (Ffine - c.fluxZ_mid[k][ic]);
+          (*cU[k])[c.idx(ic, NZ / 2)] += corr;
+          if (debug_mass && k == 0)
+            dbg_reflux_added += corr * 2 * (2 * PI * c.R[ic] * c.dR * c.dZ);
         }
       for (int jc = 0; jc < NZ / 2; ++jc)
         if (c.rho[c.idx(NR / 2, jc)] < c.floor) c.rho[c.idx(NR / 2, jc)] = c.floor;
@@ -208,10 +221,12 @@ struct NestedHydro {
 
   void step(double dt) {
     double Mc = finest().M_c, Jc = finest().J_c;        // shared central core
+    double ms = debug_mass ? composite_mass() + Mc : 0; // before restrict/gravity/prolong
     for (auto& h : lev) { h.M_c = Mc; h.J_c = Jc; }
     restrict_fluid();                                   // coarse reflects fine
     solve_gravity();                                    // nested potential
     prolong_boundary();                                 // fine boundaries from parent
+    if (debug_mass) dloss_gap += (composite_mass() + Mc) - ms;   // restrict/gravity/prolong
     // YBL: the coarse overlap (inner quarter, resolved by the finer grid) is not evolved.
     // Freezing it stops under-resolved runaways but is non-conservative (the flux it
     // exchanges with the surrounding coarse cells is one-sided), so it is OFF by default

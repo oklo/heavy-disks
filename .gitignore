@@ -28,3 +28,4 @@ lb94/test_nested
 *.dat
 lb94/collapse_ybl
 lb94/test_sedov
+lb94/test_reflux
