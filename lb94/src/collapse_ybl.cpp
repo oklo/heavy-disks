@@ -32,14 +32,11 @@ int main() {
   double dRfine = nh.finest().dR;
   for (auto& h : nh.lev) {
     h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
-    h.rho_max = 1.0e-11;                                 // clamp under-resolved coarse cells
-    h.vmax = 1.0e7;                                      // 100 km/s velocity ceiling
+    h.vmax = 1.0e7;                                      // 100 km/s velocity ceiling (no mass loss)
     h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
   nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
-  nh.finest().rho_max = 1e300;                           // no lossy clamp on the finest: the sink
-                                                         // (conservative -> M_c) + vmax bound it
   for (int l = 0; l < nlev; ++l) {
     Hydro& h = nh.lev[l];
     for (int i = 0; i < NR; ++i)
@@ -55,12 +52,7 @@ int main() {
       }
   }
 
-  auto gas_mass = [&]() {
-    Hydro& h = nh.lev[0]; double m = 0;
-    for (int i = 0; i < NR; ++i)
-      for (int j = 0; j < NZ; ++j) m += h.rho[h.idx(i, j)] * 2 * (2 * PI * h.R[i] * h.dR * h.dZ);
-    return m;
-  };
+  auto gas_mass = [&]() { return nh.composite_mass(); };   // finest-resolved, not lagged
   double m0 = gas_mass();
   printf("YBL standard case:  M=%.3f Msun  Rcloud=%.0f AU  cs=%.3f km/s  t_ff=%.0f yr\n",
          m0 / Msun, Rcloud / AU, std::sqrt(cs2) / 1e5, t_ff / yr);
@@ -72,7 +64,7 @@ int main() {
   double tmax = 6.2e4 * yr;                              // the LB94 SPH-initial epoch (~60 kyr)
   while (t < tmax && nstep < 400000) {
     double dt = std::min(nh.timestep(0.3), 2.0e-3 * t_ff);
-    nh.step(dt); nh.conserve_mass(m0); t += dt; ++nstep;
+    nh.step(dt); t += dt; ++nstep;     // refluxing (in step) conserves; no renormalization
     {
       int bl = -1, bc = -1;
       for (int l = 0; l < nlev && bl < 0; ++l) {
@@ -103,6 +95,8 @@ int main() {
       printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f      %.0f\n",
              t / yr, t / t_ff, nh.finest().M_c / Msun, gas_mass() / Msun,
              (gas_mass() + nh.finest().M_c) / m0, Rout / AU, Tdisk);
+      fprintf(stderr, "   cumulative loss: level-steps %.4f, reflux %.4f (of m0)\n",
+              nh.dloss_levels / m0, nh.dloss_reflux / m0);
       fflush(stdout); nextlog += 0.5e4 * yr;
     }
   }

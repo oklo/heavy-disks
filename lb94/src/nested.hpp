@@ -77,6 +77,8 @@ struct NestedHydro {
   int nlev, NR, NZ;
   double L, G;
   bool freeze_overlap = false;                     // freeze coarse overlap (non-conservative)
+  bool debug_mass = false;                         // accumulate per-phase mass change
+  double dloss_levels = 0, dloss_reflux = 0;
   std::vector<Hydro> lev;                          // 0 coarsest ... nlev-1 finest
 
   NestedHydro(int nlev_, int NR_, int NZ_, double L_, double G_,
@@ -125,6 +127,33 @@ struct NestedHydro {
     }
   }
 
+  // Berger-Colella flux correction at each coarse/fine interface: the coarse cell just
+  // outside the fine region used a coarse flux there; replace its effect with the
+  // (area-weighted) sum of the fine sub-face fluxes so mass/momentum/energy are conserved
+  // exactly across the interface.  (Synchronous stepping -> single dt, no subcycle sum.)
+  void reflux(double dt) {
+    for (int l = 1; l < nlev; ++l) {
+      Hydro& f = lev[l]; Hydro& c = lev[l - 1];
+      int nq = f.use_energy ? 5 : 4;
+      std::vector<double>* cU[5] = {&c.rho, &c.sR, &c.sZ, &c.A, &c.e};
+      for (int jc = 0; jc < NZ / 2; ++jc)        // R-interface: coarse cell (NR/2, jc)
+        for (int k = 0; k < nq; ++k) {
+          double Ffine = 0.5 * (f.fluxR_out[k][2 * jc] + f.fluxR_out[k][2 * jc + 1]);
+          (*cU[k])[c.idx(NR / 2, jc)] += dt / (c.R[NR / 2] * c.dR) * (Ffine - c.fluxR_mid[k][jc]);
+        }
+      for (int ic = 0; ic < NR / 2; ++ic)        // Z-interface: coarse cell (ic, NZ/2)
+        for (int k = 0; k < nq; ++k) {
+          double Ffine = (f.R[2 * ic] * f.fluxZ_out[k][2 * ic] +
+                          f.R[2 * ic + 1] * f.fluxZ_out[k][2 * ic + 1]) / (2.0 * c.R[ic]);
+          (*cU[k])[c.idx(ic, NZ / 2)] += dt / c.dZ * (Ffine - c.fluxZ_mid[k][ic]);
+        }
+      for (int jc = 0; jc < NZ / 2; ++jc)
+        if (c.rho[c.idx(NR / 2, jc)] < c.floor) c.rho[c.idx(NR / 2, jc)] = c.floor;
+      for (int ic = 0; ic < NR / 2; ++ic)
+        if (c.rho[c.idx(ic, NZ / 2)] < c.floor) c.rho[c.idx(ic, NZ / 2)] = c.floor;
+    }
+  }
+
   void solve_gravity() {
     lev[0].poisson.solve(lev[0].rho, lev[0].Phi);
     for (int l = 1; l < nlev; ++l) {
@@ -147,6 +176,20 @@ struct NestedHydro {
     Hydro& h = lev[0]; double m = 0;
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) m += h.rho[h.idx(i, j)] * 2 * (2 * PI * h.R[i] * h.dR * h.dZ);
+    return m;
+  }
+  // true total at the finest available resolution (each region counted once): each level's
+  // non-overlap cells + the finest grid's full domain.  Current (not restriction-lagged).
+  double composite_mass() {
+    double m = 0;
+    for (int l = 0; l < nlev; ++l) {
+      Hydro& h = lev[l];
+      for (int i = 0; i < NR; ++i)
+        for (int j = 0; j < NZ; ++j) {
+          if (l < nlev - 1 && i < NR / 2 && j < NZ / 2) continue;   // covered by a finer level
+          m += h.rho[h.idx(i, j)] * 2 * (2 * PI * h.R[i] * h.dR * h.dZ);
+        }
+    }
     return m;
   }
 
@@ -184,7 +227,14 @@ struct NestedHydro {
             s.push_back(h.A[c]); s.push_back(h.e[c]);
           }
       }
+    double m0 = debug_mass ? composite_mass() + finest().M_c : 0;
     for (auto& h : lev) h.step(dt);                     // finest also accretes -> M_c
+    double m1 = debug_mass ? composite_mass() + finest().M_c : 0;
+    reflux(dt);                                         // Berger-Colella interface correction
+    if (debug_mass) {
+      double m2 = composite_mass() + finest().M_c;
+      dloss_levels += m1 - m0; dloss_reflux += m2 - m1;
+    }
     if (freeze_overlap)
       for (int l = 0; l < nlev - 1; ++l) {
         Hydro& h = lev[l]; auto& s = saved[l]; int k = 0;

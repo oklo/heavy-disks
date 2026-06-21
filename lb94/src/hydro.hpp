@@ -24,6 +24,9 @@ struct Hydro {
   // nested-grid ghost state at the outer R and Z boundaries ([rho,sR,sZ,A] each)
   bool ghostBC = false;
   std::vector<std::vector<double>> ghostR{4}, ghostZ{4};
+  // Berger-Colella refluxing: saved transport fluxes at the outer boundary (this grid as
+  // the FINE child) and at the mid faces NR/2, NZ/2 (this grid as the COARSE parent).
+  std::vector<std::vector<double>> fluxR_out{5}, fluxR_mid{5}, fluxZ_out{5}, fluxZ_mid{5};
   Poisson poisson;
   // barotropic EOS: P = cs2 * rho  (rho < rho_crit);  P = cs2*rho_crit*(rho/rho_crit)^gam above
   double cs2, rho_crit, gam;
@@ -40,6 +43,10 @@ struct Hydro {
     rho.assign(n, floor); sR.assign(n, 0); sZ.assign(n, 0); A.assign(n, 0); Phi.assign(n, 0);
     e.assign(n, 0.0);
     for (int k = 0; k < 4; ++k) { ghostR[k].assign(NZ, 0.0); ghostZ[k].assign(NR, 0.0); }
+    for (int k = 0; k < 5; ++k) {
+      fluxR_out[k].assign(NZ, 0.0); fluxR_mid[k].assign(NZ, 0.0);
+      fluxZ_out[k].assign(NR, 0.0); fluxZ_mid[k].assign(NR, 0.0);
+    }
   }
   double Cq = 1.4;                    // von Neumann artificial-viscosity coefficient (R85)
   // central unresolved core/sink (BYRT90): within R_sink the density is capped at
@@ -210,6 +217,7 @@ struct Hydro {
           F[NR] = NR * dR * vf * qf;
         } else
           F[NR] = NR * dR * std::max(vc[idx(NR - 1, j)], 0.0) * Q[idx(NR - 1, j)];
+        fluxR_out[k][j] = F[NR]; fluxR_mid[k][j] = F[NR / 2];   // save for refluxing
         for (int i = 0; i < NR; ++i)
           nQ[idx(i, j)] -= dt / (R[i] * dR) * (F[i + 1] - F[i]);
       }
@@ -247,6 +255,7 @@ struct Hydro {
           F[NZ] = vf * qf;
         } else
           F[NZ] = std::max(vc[idx(i, NZ - 1)], 0.0) * Q[idx(i, NZ - 1)];  // outflow
+        fluxZ_out[k][i] = F[NZ]; fluxZ_mid[k][i] = F[NZ / 2];   // save for refluxing
         for (int j = 0; j < NZ; ++j)
           nQ[idx(i, j)] -= dt / dZ * (F[j + 1] - F[j]);
       }
