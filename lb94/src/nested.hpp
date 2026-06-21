@@ -76,6 +76,7 @@ struct NestedGravity {
 struct NestedHydro {
   int nlev, NR, NZ;
   double L, G;
+  bool freeze_overlap = false;                     // freeze coarse overlap (non-conservative)
   std::vector<Hydro> lev;                          // 0 coarsest ... nlev-1 finest
 
   NestedHydro(int nlev_, int NR_, int NZ_, double L_, double G_,
@@ -142,34 +143,58 @@ struct NestedHydro {
     return dt;
   }
 
+  double gas_mass() {                              // total gas mass (from the coarsest grid)
+    Hydro& h = lev[0]; double m = 0;
+    for (int i = 0; i < NR; ++i)
+      for (int j = 0; j < NZ; ++j) m += h.rho[h.idx(i, j)] * 2 * (2 * PI * h.R[i] * h.dR * h.dZ);
+    return m;
+  }
+
+  // Correct the small per-step interface leak (no refluxing yet) by renormalizing the gas
+  // mass to (m0 - M_c).  Scales rho, momenta, A, e together -> velocities, T, Omega unchanged.
+  // (Berger-Colella refluxing is the proper conservative fix.)
+  void conserve_mass(double m0) {
+    double gas = gas_mass(), target = m0 - finest().M_c;
+    if (gas <= 0 || target <= 0) return;
+    double f = target / gas;
+    for (auto& h : lev)
+      for (int c = 0; c < NR * NZ; ++c) {
+        h.rho[c] *= f; h.sR[c] *= f; h.sZ[c] *= f; h.A[c] *= f; h.e[c] *= f;
+      }
+  }
+
   void step(double dt) {
     double Mc = finest().M_c, Jc = finest().J_c;        // shared central core
     for (auto& h : lev) { h.M_c = Mc; h.J_c = Jc; }
     restrict_fluid();                                   // coarse reflects fine
     solve_gravity();                                    // nested potential
     prolong_boundary();                                 // fine boundaries from parent
-    // YBL: the coarse overlap (inner quarter, resolved by the finer grid) is not evolved --
-    // freeze it during the step so its under-resolved cells cannot run away / NaN.
+    // YBL: the coarse overlap (inner quarter, resolved by the finer grid) is not evolved.
+    // Freezing it stops under-resolved runaways but is non-conservative (the flux it
+    // exchanges with the surrounding coarse cells is one-sided), so it is OFF by default
+    // now that the velocity ceiling bounds the coarse runaway directly.
     std::vector<std::vector<double>> saved(nlev);
-    for (int l = 0; l < nlev - 1; ++l) {
-      Hydro& h = lev[l]; auto& s = saved[l];
-      for (int ip = 0; ip < NR / 2; ++ip)
-        for (int jp = 0; jp < NZ / 2; ++jp) {
-          int c = ip * NZ + jp;
-          s.push_back(h.rho[c]); s.push_back(h.sR[c]); s.push_back(h.sZ[c]);
-          s.push_back(h.A[c]); s.push_back(h.e[c]);
-        }
-    }
+    if (freeze_overlap)
+      for (int l = 0; l < nlev - 1; ++l) {
+        Hydro& h = lev[l]; auto& s = saved[l];
+        for (int ip = 0; ip < NR / 2; ++ip)
+          for (int jp = 0; jp < NZ / 2; ++jp) {
+            int c = ip * NZ + jp;
+            s.push_back(h.rho[c]); s.push_back(h.sR[c]); s.push_back(h.sZ[c]);
+            s.push_back(h.A[c]); s.push_back(h.e[c]);
+          }
+      }
     for (auto& h : lev) h.step(dt);                     // finest also accretes -> M_c
-    for (int l = 0; l < nlev - 1; ++l) {
-      Hydro& h = lev[l]; auto& s = saved[l]; int k = 0;
-      for (int ip = 0; ip < NR / 2; ++ip)
-        for (int jp = 0; jp < NZ / 2; ++jp) {
-          int c = ip * NZ + jp;
-          h.rho[c] = s[k++]; h.sR[c] = s[k++]; h.sZ[c] = s[k++];
-          h.A[c] = s[k++]; h.e[c] = s[k++];
-        }
-    }
+    if (freeze_overlap)
+      for (int l = 0; l < nlev - 1; ++l) {
+        Hydro& h = lev[l]; auto& s = saved[l]; int k = 0;
+        for (int ip = 0; ip < NR / 2; ++ip)
+          for (int jp = 0; jp < NZ / 2; ++jp) {
+            int c = ip * NZ + jp;
+            h.rho[c] = s[k++]; h.sR[c] = s[k++]; h.sZ[c] = s[k++];
+            h.A[c] = s[k++]; h.e[c] = s[k++];
+          }
+      }
   }
 };
 

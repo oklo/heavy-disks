@@ -293,7 +293,46 @@ struct Hydro {
     }
   }
 
-  void step(double dt) { source(dt); radiative_cooling(dt); transport(dt); accrete(dt); }
+  // physical (Shakura-Sunyaev) viscosity (LB94 addition): eta = alpha cs H rho.
+  // Transports angular momentum, (1/R)d_R(eta R^3 d_R Omega) + d_Z(eta R^2 d_Z Omega),
+  // and heats the gas by the viscous dissipation eta R^2 [(d_R Omega)^2 + (d_Z Omega)^2].
+  double alpha_visc = 0.0;
+  void viscosity(double dt) {
+    if (alpha_visc <= 0 || !use_energy) return;
+    std::vector<double> eta((size_t)NR * NZ, 0.0), Om((size_t)NR * NZ, 0.0);
+    for (int i = 0; i < NR; ++i)
+      for (int j = 0; j < NZ; ++j) {
+        int c = idx(i, j); double d = rho[c];
+        if (d < rho_active) continue;
+        double omega = A[c] / (d * R[i] * R[i]);
+        double cs = cs_cell(c);
+        double H = cs / std::max(std::fabs(omega), 1e-30);     // disk scale height cs/Omega
+        eta[c] = alpha_visc * cs * H * d; Om[c] = omega;
+      }
+    std::vector<double> nA = A, ne = e;
+    for (int i = 0; i < NR; ++i)
+      for (int j = 0; j < NZ; ++j) {
+        int c = idx(i, j);
+        double FRp = 0, FRm = 0, FZp = 0, FZm = 0;
+        if (i < NR - 1) FRp = 0.5 * (eta[c] + eta[idx(i + 1, j)]) * std::pow((i + 1) * dR, 3) *
+                              (Om[idx(i + 1, j)] - Om[c]) / dR;
+        if (i > 0)      FRm = 0.5 * (eta[idx(i - 1, j)] + eta[c]) * std::pow(i * dR, 3) *
+                              (Om[c] - Om[idx(i - 1, j)]) / dR;
+        if (j < NZ - 1) FZp = 0.5 * (eta[c] + eta[idx(i, j + 1)]) * R[i] * R[i] *
+                              (Om[idx(i, j + 1)] - Om[c]) / dZ;
+        if (j > 0)      FZm = 0.5 * (eta[idx(i, j - 1)] + eta[c]) * R[i] * R[i] *
+                              (Om[c] - Om[idx(i, j - 1)]) / dZ;
+        nA[c] += dt * ((FRp - FRm) / (R[i] * dR) + (FZp - FZm) / dZ);
+        double dOmR = (i > 0 && i < NR - 1) ? (Om[idx(i + 1, j)] - Om[idx(i - 1, j)]) / (2 * dR) : 0;
+        double dOmZ = (j > 0 && j < NZ - 1) ? (Om[idx(i, j + 1)] - Om[idx(i, j - 1)]) / (2 * dZ) : 0;
+        ne[c] += dt * eta[c] * R[i] * R[i] * (dOmR * dOmR + dOmZ * dOmZ);   // viscous heating
+      }
+    A.swap(nA); e.swap(ne);
+  }
+
+  void step(double dt) {
+    source(dt); radiative_cooling(dt); viscosity(dt); transport(dt); accrete(dt);
+  }
 };
 
 }  // namespace lb94

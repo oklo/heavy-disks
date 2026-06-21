@@ -18,8 +18,9 @@ int main() {
   const double Tgas = 20.0, Omega0 = 4.4e-13;
   const double cs2 = kB * Tgas / (mu * mH);              // isothermal sound speed^2
   const double rho_crit = 1.0e-13, gam = 1.4;            // barotropic (first core)
-  const int NR = 60, NZ = 60, nlev = 4;                  // -> innermost dR ~ 5.55 AU
-  const double L = Rcloud;                               // coarsest box = cloud radius
+  const int NR = 60, NZ = 60, nlev = 4;
+  const double L = 2.0 * Rcloud;                         // box >> cloud: cloud well inside the
+                                                         // coarsest grid, disk inside the finest
 
   const double rho_mean = Mtot / (4.0 / 3.0 * PI * Rcloud * Rcloud * Rcloud);
   const double t_ff = std::sqrt(3.0 * PI / (32.0 * G * rho_mean));
@@ -37,6 +38,8 @@ int main() {
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
   nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
+  nh.finest().rho_max = 1e300;                           // no lossy clamp on the finest: the sink
+                                                         // (conservative -> M_c) + vmax bound it
   for (int l = 0; l < nlev; ++l) {
     Hydro& h = nh.lev[l];
     for (int i = 0; i < NR; ++i)
@@ -69,7 +72,7 @@ int main() {
   double tmax = 6.2e4 * yr;                              // the LB94 SPH-initial epoch (~60 kyr)
   while (t < tmax && nstep < 400000) {
     double dt = std::min(nh.timestep(0.3), 2.0e-3 * t_ff);
-    nh.step(dt); t += dt; ++nstep;
+    nh.step(dt); nh.conserve_mass(m0); t += dt; ++nstep;
     {
       int bl = -1, bc = -1;
       for (int l = 0; l < nlev && bl < 0; ++l) {
