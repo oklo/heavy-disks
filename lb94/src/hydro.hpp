@@ -48,6 +48,10 @@ struct Hydro {
   double R_sink = 0.0, rho_ceiling = 0.0, M_c = 0.0, J_c = 0.0, Mdot = 0.0;
   double rho_max = 1e300;             // hard density clamp (stabilizes under-resolved coarse
                                       // overlap cells, which are overwritten by restriction)
+  // radiative cooling (simplified gray): cool toward T_amb on the radiative-diffusion time,
+  // suppressed by local optical depth so optically-thick regions retain compression heat.
+  bool radiation = false;
+  double mu_gas = 2.34, kap0 = 2.0e-4, Tamb = 20.0;   // dust opacity kappa = kap0 T^2 (cgs)
   inline int idx(int i, int j) const { return i * NZ + j; }
   static inline double vanleer(double a, double b) {
     return (a * b > 0.0) ? 2.0 * a * b / (a + b) : 0.0;
@@ -150,7 +154,7 @@ struct Hydro {
         double f = rho_ceiling / rho[c];                       // keep this fraction
         double vol = 2.0 * (2.0 * PI * R[i] * dR * dZ);        // full ring (mirror Z<0)
         dM += rho[c] * (1.0 - f) * vol; dJ += A[c] * (1.0 - f) * vol;
-        rho[c] = rho_ceiling; sR[c] *= f; sZ[c] *= f; A[c] *= f;   // keep velocities
+        rho[c] = rho_ceiling; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f;   // keep velocities/T
       }
     M_c += dM; J_c += dJ; Mdot = dM / dt;
   }
@@ -239,15 +243,36 @@ struct Hydro {
     // floor/clamp density and clear momentum in vacuum cells
     for (int c = 0; c < NR * NZ; ++c) {
       if (rho[c] < floor) rho[c] = floor;
-      if (rho[c] > rho_max) {                              // clamp (keep velocity)
-        double f = rho_max / rho[c]; sR[c] *= f; sZ[c] *= f; A[c] *= f; rho[c] = rho_max;
+      if (rho[c] > rho_max) {                              // clamp (keep velocity/T)
+        double f = rho_max / rho[c]; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f; rho[c] = rho_max;
       }
       if (rho[c] < rho_active) { sR[c] = sZ[c] = A[c] = 0.0; }
       if (use_energy && e[c] < emin) e[c] = emin;
     }
   }
 
-  void step(double dt) { source(dt); transport(dt); accrete(dt); }
+  // simplified gray radiative cooling: relax e toward the ambient-temperature value on the
+  // (optical-depth-suppressed) radiative cooling time.  T_thin -> T_amb; T_thick stays hot.
+  void radiative_cooling(double dt) {
+    if (!radiation || !use_energy) return;
+    const double kB = 1.380649e-16, mH = 1.6726e-24, a_rad = 7.5657e-15, cl = 2.998e10;
+    const double sig = a_rad * cl / 4.0, Tamb4 = Tamb * Tamb * Tamb * Tamb;
+    double cv = kB / ((gam - 1.0) * mu_gas * mH);     // e = rho cv T
+    for (int c = 0; c < NR * NZ; ++c) {
+      double d = rho[c];
+      if (d < rho_active) continue;
+      double T = e[c] / (d * cv);                       // relax toward Tamb from both sides
+      double kappa = kap0 * std::max(T, Tamb) * std::max(T, Tamb);
+      double Hj = cs_cell(c) / std::sqrt(4.0 * PI * std::max(G, 1e-30) * d);
+      double tau = kappa * d * Hj;
+      double coolrate = 4.0 * kappa * d * sig * (T * T * T * T - Tamb4) / (1.0 + tau * tau);
+      double e_eq = d * cv * Tamb;
+      double tcool = (e[c] - e_eq) / std::max(coolrate, 1e-300);
+      if (tcool > 0) e[c] = e_eq + (e[c] - e_eq) * std::exp(-dt / tcool);
+    }
+  }
+
+  void step(double dt) { source(dt); radiative_cooling(dt); transport(dt); accrete(dt); }
 };
 
 }  // namespace lb94

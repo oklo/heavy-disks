@@ -95,16 +95,17 @@ struct NestedHydro {
       Hydro& f = lev[l]; Hydro& p = lev[l - 1];
       for (int ip = 0; ip < NR / 2; ++ip)
         for (int jp = 0; jp < NZ / 2; ++jp) {
-          double vol = 0, mr = 0, mu = 0, mw = 0, ma = 0;
+          double vol = 0, mr = 0, mu = 0, mw = 0, ma = 0, me = 0;
           for (int a = 0; a < 2; ++a)
             for (int b = 0; b < 2; ++b) {
               int c = (2 * ip + a) * NZ + (2 * jp + b);
               double vf = f.R[2 * ip + a] * f.dR * f.dZ;
               vol += vf; mr += f.rho[c] * vf; mu += f.sR[c] * vf;
-              mw += f.sZ[c] * vf; ma += f.A[c] * vf;
+              mw += f.sZ[c] * vf; ma += f.A[c] * vf; me += f.e[c] * vf;
             }
           int pc = ip * NZ + jp;
           p.rho[pc] = mr / vol; p.sR[pc] = mu / vol; p.sZ[pc] = mw / vol; p.A[pc] = ma / vol;
+          p.e[pc] = me / vol;
         }
     }
   }

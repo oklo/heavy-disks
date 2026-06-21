@@ -32,6 +32,7 @@ int main() {
   for (auto& h : nh.lev) {
     h.R_sink = 4.0 * dRfine; h.rho_active = rho_mean * 1e-4;
     h.rho_max = 1.0e-11;                                 // clamp under-resolved coarse cells
+    h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
   for (int l = 0; l < nlev; ++l) {
@@ -44,7 +45,8 @@ int main() {
           double rr = std::max(r, 0.5 * dRfine);
           h.rho[c] = Ccoef / rr;
           h.A[c] = h.rho[c] * h.R[i] * (Omega0 * h.R[i]);
-        } else h.rho[c] = h.floor;
+          h.e[c] = h.rho[c] * cs2 / (gam - 1.0);          // isothermal 20 K internal energy
+        } else { h.rho[c] = h.floor; h.e[c] = h.floor * cs2 / (gam - 1.0); }
       }
   }
 
@@ -59,7 +61,7 @@ int main() {
          m0 / Msun, Rcloud / AU, std::sqrt(cs2) / 1e5, t_ff / yr);
   printf("  finest dR=%.2f AU (nlev=%d)  outer Keplerian radius=%.0f AU\n",
          dRfine / AU, nlev, Rkep / AU);
-  printf("\n t(yr)    t/t_ff   M_core(Msun)  M_disk(Msun)  cons    disk Rout(AU)\n");
+  printf("\n t(yr)    t/t_ff   M_core(Msun)  M_disk(Msun)  cons    Rout(AU)  T_disk(K)\n");
 
   double t = 0, nextlog = 0; int nstep = 0;
   double tmax = 9.0e4 * yr;
@@ -85,13 +87,17 @@ int main() {
     }
     if (!std::isfinite(nh.finest().rho[0])) { printf("  [blowup t=%.0f yr]\n", t / yr); break; }
     if (t >= nextlog) {
-      // disk outer radius: largest midplane R (finest grid) with rho above a threshold
-      Hydro& f = nh.finest(); double Rout = 0;
-      for (int i = 0; i < NR; ++i)
-        if (f.rho[f.idx(i, 0)] > 10.0 * rho_mean) Rout = f.R[i];
-      printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f\n",
+      // disk outer radius + midplane temperature at the densest disk cell
+      Hydro& f = nh.finest(); double Rout = 0, rpk = 0, Tdisk = 0;
+      double cv = kB / ((gam - 1.0) * mu * mH);
+      for (int i = 0; i < NR; ++i) {
+        double d = f.rho[f.idx(i, 0)];
+        if (d > 10.0 * rho_mean) Rout = f.R[i];
+        if (f.R[i] > f.R_sink && d > rpk) { rpk = d; Tdisk = f.e[f.idx(i, 0)] / (d * cv); }
+      }
+      printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f      %.0f\n",
              t / yr, t / t_ff, nh.finest().M_c / Msun, gas_mass() / Msun,
-             (gas_mass() + nh.finest().M_c) / m0, Rout / AU);
+             (gas_mass() + nh.finest().M_c) / m0, Rout / AU, Tdisk);
       fflush(stdout); nextlog += 0.5e4 * yr;
     }
   }
