@@ -89,7 +89,13 @@ struct Hydro {
         double vr = std::fabs(sR[idx(i, j)] / d), vz = std::fabs(sZ[idx(i, j)] / d);
         double Om = std::fabs(A[idx(i, j)] / (d * R[i] * R[i]));   // angular frequency v_phi/R
         double wff = std::sqrt(4.0 * PI * G * d);                  // local free-fall rate
-        dtinv = std::max(dtinv, (vr + cs) / dR + (vz + cs) / dZ + Om + wff);
+        double rate = (vr + cs) / dR + (vz + cs) / dZ + Om + wff;
+        if (alpha_visc > 0) {                                      // explicit viscous diffusion limit
+          double H = std::min(cs / std::max(Om, 1e-30), R[i]);
+          double nu = alpha_visc * cs * H;
+          rate += 2.0 * nu * (1.0 / (dR * dR) + 1.0 / (dZ * dZ));
+        }
+        dtinv = std::max(dtinv, rate);
       }
     return cfl / dtinv;
   }
@@ -322,7 +328,9 @@ struct Hydro {
         if (d < rho_active) continue;
         double omega = A[c] / (d * R[i] * R[i]);
         double cs = cs_cell(c);
-        double H = cs / std::max(std::fabs(omega), 1e-30);     // disk scale height cs/Omega
+        // disk scale height cs/Omega, capped at R (a thin disk has H<R; uncapped it blows up
+        // in the slowly-rotating envelope where Omega->0)
+        double H = std::min(cs / std::max(std::fabs(omega), 1e-30), R[i]);
         eta[c] = alpha_visc * cs * H * d; Om[c] = omega;
       }
     std::vector<double> nA = A, ne = e;

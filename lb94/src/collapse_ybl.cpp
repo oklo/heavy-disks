@@ -5,10 +5,12 @@
 #include "nested.hpp"
 #include <cstdio>
 #include <cmath>
+#include <cstdlib>
 
 using namespace lb94;
 
-int main() {
+int main(int argc, char** argv) {
+  const double alpha = (argc > 1) ? std::atof(argv[1]) : 0.0;   // Shakura-Sunyaev alpha (disk)
   // cgs constants
   const double G = 6.67430e-8, Msun = 1.989e33, AU = 1.496e13, yr = 3.156e7;
   const double kB = 1.380649e-16, mH = 1.6726e-24, mu = 2.34;
@@ -42,6 +44,7 @@ int main() {
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
   nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
+  nh.finest().alpha_visc = alpha;                        // physical alpha-viscosity in the disk
   for (int l = 0; l < nlev; ++l) {
     Hydro& h = nh.lev[l];
     for (int i = 0; i < NR; ++i)
@@ -59,8 +62,12 @@ int main() {
 
   auto gas_mass = [&]() { return nh.composite_mass(); };   // finest-resolved, not lagged
   double m0 = gas_mass();
-  printf("YBL standard case:  M=%.3f Msun  Rcloud=%.0f AU  cs=%.3f km/s  t_ff=%.0f yr\n",
-         m0 / Msun, Rcloud / AU, std::sqrt(cs2) / 1e5, t_ff / yr);
+  char tag[32]; std::snprintf(tag, sizeof(tag), "a%.3f", alpha);
+  char fn_mcore[64]; std::snprintf(fn_mcore, sizeof(fn_mcore), "lb94/ybl_mcore_%s.dat", tag);
+  FILE* fmc = fopen(fn_mcore, "w");                       // Fig 1: t, M_core, M_disk
+  fprintf(fmc, "# t(yr)  M_core(Msun)  M_disk(Msun)   alpha=%.3f\n", alpha);
+  printf("YBL standard case:  M=%.3f Msun  Rcloud=%.0f AU  cs=%.3f km/s  t_ff=%.0f yr  alpha=%.3f\n",
+         m0 / Msun, Rcloud / AU, std::sqrt(cs2) / 1e5, t_ff / yr, alpha);
   printf("  finest dR=%.2f AU (nlev=%d)  outer Keplerian radius=%.0f AU\n",
          dRfine / AU, nlev, Rkep / AU);
   printf("\n t(yr)    t/t_ff   M_core(Msun)  M_disk(Msun)  cons    Rout(AU)  T_disk(K)\n");
@@ -102,15 +109,32 @@ int main() {
       printf(" %.2e  %.3f   %.4f       %.4f      %.4f   %.0f      %.0f\n",
              t / yr, t / t_ff, nh.finest().M_c / Msun, gas_mass() / Msun,
              (gas_mass() + nh.finest().M_c - floored) / m0, Rout / AU, Tdisk);
+      fprintf(fmc, "%.5e %.6f %.6f\n", t / yr, nh.finest().M_c / Msun, gas_mass() / Msun);
       fflush(stdout); nextlog += 0.5e4 * yr;
     }
   }
+  fclose(fmc);
   Hydro& f = nh.finest();
   FILE* fp = fopen("lb94/ybl_rho.dat", "w");
   for (int i = 0; i < NR; ++i)
     for (int j = 0; j < NZ; ++j)
       fprintf(fp, "%.4e %.4e %.6e\n", f.R[i] / AU, f.Z[j] / AU, f.rho[f.idx(i, j)]);
   fclose(fp);
+  // Fig 2: radial disk profiles on the finest grid at the final epoch -- surface density
+  // Sigma=int rho dZ (both sides), midplane T, mass-weighted specific angular momentum j=<A>/<rho>
+  char fn_prof[64]; std::snprintf(fn_prof, sizeof(fn_prof), "lb94/ybl_prof_%s.dat", tag);
+  FILE* fpr = fopen(fn_prof, "w");
+  fprintf(fpr, "# R(AU)  Sigma(g/cm2)  T_mid(K)  j(cm2/s)   alpha=%.3f t=%.0fyr\n", alpha, t / yr);
+  double cv = kB / ((gam - 1.0) * mu * mH);
+  for (int i = 0; i < NR; ++i) {
+    double Sig = 0, colA = 0;
+    for (int j = 0; j < NZ; ++j) { Sig += f.rho[f.idx(i, j)] * f.dZ * 2.0; colA += f.A[f.idx(i, j)] * f.dZ * 2.0; }
+    double dmid = f.rho[f.idx(i, 0)];
+    double Tmid = dmid > 10.0 * rho_mean ? f.e[f.idx(i, 0)] / (dmid * cv) : 0.0;
+    double j_sp = Sig > 0 ? colA / Sig : 0.0;             // <A>/<rho> = R<v_phi> (mass-weighted)
+    fprintf(fpr, "%.4e %.6e %.4e %.6e\n", f.R[i] / AU, Sig, Tmid, j_sp);
+  }
+  fclose(fpr);
   double floored = 0;
   for (auto& h : nh.lev) floored += h.dbg_mass_floored;
   printf("\nfinal: M_core=%.3f Msun (%.0f%%) at t=%.0f yr,  steps=%d\n",
