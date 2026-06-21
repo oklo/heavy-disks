@@ -42,6 +42,8 @@ struct Hydro {
   // rho_ceiling (a resolved value, Jeans length > few cells) and the excess mass+angular
   // momentum is accreted onto the core M_c, J_c.  Avoids the under-resolved Truelove runaway.
   double R_sink = 0.0, rho_ceiling = 0.0, M_c = 0.0, J_c = 0.0, Mdot = 0.0;
+  double rho_max = 1e300;             // hard density clamp (stabilizes under-resolved coarse
+                                      // overlap cells, which are overwritten by restriction)
   inline int idx(int i, int j) const { return i * NZ + j; }
   static inline double vanleer(double a, double b) {
     return (a * b > 0.0) ? 2.0 * a * b / (a + b) : 0.0;
@@ -116,14 +118,14 @@ struct Hydro {
     sR.swap(nsR); sZ.swap(nsZ);
   }
 
-  // density-ceiling sink: within R_sink, cap rho at rho_ceiling, accrete the excess
-  // (with its momentum/angular momentum) onto the core.  Smooth (no floor discontinuity).
+  // density-based sink: any cell above rho_ceiling (the Truelove-unresolved gas, i.e. the
+  // central object + any inner-edge pile-up) is capped and its excess mass + angular
+  // momentum accreted onto the core.  No hard radius edge -> no edge pile-up.
   void accrete(double dt) {
-    if (R_sink <= 0 || rho_ceiling <= 0) return;
+    if (rho_ceiling <= 0) return;
     double dM = 0.0, dJ = 0.0;
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) {
-        if (std::sqrt(R[i] * R[i] + Z[j] * Z[j]) >= R_sink) continue;
         int c = idx(i, j);
         if (rho[c] <= rho_ceiling) continue;
         double f = rho_ceiling / rho[c];                       // keep this fraction
@@ -212,9 +214,12 @@ struct Hydro {
       }
       Q.swap(nQ);
     }
-    // floor density and clear momentum in vacuum cells (no spurious vacuum velocities)
+    // floor/clamp density and clear momentum in vacuum cells
     for (int c = 0; c < NR * NZ; ++c) {
       if (rho[c] < floor) rho[c] = floor;
+      if (rho[c] > rho_max) {                              // clamp (keep velocity)
+        double f = rho_max / rho[c]; sR[c] *= f; sZ[c] *= f; A[c] *= f; rho[c] = rho_max;
+      }
       if (rho[c] < rho_active) { sR[c] = sZ[c] = A[c] = 0.0; }
     }
   }
