@@ -33,7 +33,8 @@ int main() {
   double dRfine = nh.finest().dR;
   for (auto& h : nh.lev) {
     h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
-    h.vmax = 1.0e7;                                      // 100 km/s velocity ceiling (no mass loss)
+    h.vmax = 1.0e300;                                    // velocity ceiling OFF (test: finer grid +
+                                                         // sink should bound the center without it)
     h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
     h.floor = rho_mean * 1e-3;                           // ~500x below cloud density: stable van Leer
                                                          // advection (much lower -> negative-rho
