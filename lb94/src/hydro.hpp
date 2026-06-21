@@ -48,6 +48,7 @@ struct Hydro {
   double R_sink = 0.0, rho_ceiling = 0.0, M_c = 0.0, J_c = 0.0, Mdot = 0.0;
   double rho_max = 1e300;             // hard density clamp (stabilizes under-resolved coarse
                                       // overlap cells, which are overwritten by restriction)
+  double vmax = 1e300;                // velocity ceiling (caps central runaway -> bounded dt)
   // radiative cooling (simplified gray): cool toward T_amb on the radiative-diffusion time,
   // suppressed by local optical depth so optically-thick regions retain compression heat.
   bool radiation = false;
@@ -144,17 +145,28 @@ struct Hydro {
   // density-based sink: any cell above rho_ceiling (the Truelove-unresolved gas, i.e. the
   // central object + any inner-edge pile-up) is capped and its excess mass + angular
   // momentum accreted onto the core.  No hard radius edge -> no edge pile-up.
+  double t_drain = 0.0;               // if >0, gas within R_sink is drained onto the core on
+                                      // this timescale (quiescent unresolved central object)
   void accrete(double dt) {
     if (rho_ceiling <= 0) return;
     double dM = 0.0, dJ = 0.0;
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) {
         int c = idx(i, j);
-        if (rho[c] <= rho_ceiling) continue;
-        double f = rho_ceiling / rho[c];                       // keep this fraction
         double vol = 2.0 * (2.0 * PI * R[i] * dR * dZ);        // full ring (mirror Z<0)
-        dM += rho[c] * (1.0 - f) * vol; dJ += A[c] * (1.0 - f) * vol;
-        rho[c] = rho_ceiling; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f;   // keep velocities/T
+        // (1) density cap: accrete the Truelove-unresolved excess everywhere
+        if (rho[c] > rho_ceiling) {
+          double f = rho_ceiling / rho[c];
+          dM += rho[c] * (1.0 - f) * vol; dJ += A[c] * (1.0 - f) * vol;
+          rho[c] = rho_ceiling; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f;
+        }
+        // (2) central sink: within R_sink drain gas onto the core (quiets the axis region)
+        if (t_drain > 0 && R_sink > 0 &&
+            std::sqrt(R[i] * R[i] + Z[j] * Z[j]) < R_sink && rho[c] > rho_active) {
+          double g = std::min(dt / t_drain, 1.0);
+          dM += rho[c] * g * vol; dJ += A[c] * g * vol;
+          rho[c] *= (1 - g); sR[c] *= (1 - g); sZ[c] *= (1 - g); A[c] *= (1 - g); e[c] *= (1 - g);
+        }
       }
     M_c += dM; J_c += dJ; Mdot = dM / dt;
   }
@@ -248,6 +260,11 @@ struct Hydro {
       }
       if (rho[c] < rho_active) { sR[c] = sZ[c] = A[c] = 0.0; }
       if (use_energy && e[c] < emin) e[c] = emin;
+      if (vmax < 1e290) {                                // velocity ceiling
+        double dv = vdiv(rho[c]);
+        if (std::fabs(sR[c]) > vmax * dv) sR[c] = std::copysign(vmax * dv, sR[c]);
+        if (std::fabs(sZ[c]) > vmax * dv) sZ[c] = std::copysign(vmax * dv, sZ[c]);
+      }
     }
   }
 
@@ -267,8 +284,12 @@ struct Hydro {
       double tau = kappa * d * Hj;
       double coolrate = 4.0 * kappa * d * sig * (T * T * T * T - Tamb4) / (1.0 + tau * tau);
       double e_eq = d * cv * Tamb;
-      double tcool = (e[c] - e_eq) / std::max(coolrate, 1e-300);
-      if (tcool > 0) e[c] = e_eq + (e[c] - e_eq) * std::exp(-dt / tcool);
+      // relax e toward e_eq: tcool = (e-e_eq)/coolrate is positive for BOTH cooling (T>Tamb)
+      // and heating (T<Tamb), since the two factors share sign.
+      if (coolrate != 0.0) {
+        double tcool = (e[c] - e_eq) / coolrate;
+        if (tcool > 0) e[c] = e_eq + (e[c] - e_eq) * std::exp(-dt / tcool);
+      }
     }
   }
 

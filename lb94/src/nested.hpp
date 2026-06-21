@@ -148,7 +148,28 @@ struct NestedHydro {
     restrict_fluid();                                   // coarse reflects fine
     solve_gravity();                                    // nested potential
     prolong_boundary();                                 // fine boundaries from parent
+    // YBL: the coarse overlap (inner quarter, resolved by the finer grid) is not evolved --
+    // freeze it during the step so its under-resolved cells cannot run away / NaN.
+    std::vector<std::vector<double>> saved(nlev);
+    for (int l = 0; l < nlev - 1; ++l) {
+      Hydro& h = lev[l]; auto& s = saved[l];
+      for (int ip = 0; ip < NR / 2; ++ip)
+        for (int jp = 0; jp < NZ / 2; ++jp) {
+          int c = ip * NZ + jp;
+          s.push_back(h.rho[c]); s.push_back(h.sR[c]); s.push_back(h.sZ[c]);
+          s.push_back(h.A[c]); s.push_back(h.e[c]);
+        }
+    }
     for (auto& h : lev) h.step(dt);                     // finest also accretes -> M_c
+    for (int l = 0; l < nlev - 1; ++l) {
+      Hydro& h = lev[l]; auto& s = saved[l]; int k = 0;
+      for (int ip = 0; ip < NR / 2; ++ip)
+        for (int jp = 0; jp < NZ / 2; ++jp) {
+          int c = ip * NZ + jp;
+          h.rho[c] = s[k++]; h.sR[c] = s[k++]; h.sZ[c] = s[k++];
+          h.A[c] = s[k++]; h.e[c] = s[k++];
+        }
+    }
   }
 };
 

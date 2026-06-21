@@ -30,11 +30,13 @@ int main() {
   NestedHydro nh(nlev, NR, NZ, L, G, cs2, rho_crit, gam);
   double dRfine = nh.finest().dR;
   for (auto& h : nh.lev) {
-    h.R_sink = 4.0 * dRfine; h.rho_active = rho_mean * 1e-4;
+    h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
     h.rho_max = 1.0e-11;                                 // clamp under-resolved coarse cells
+    h.vmax = 1.0e7;                                      // 100 km/s velocity ceiling
     h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
   }
   nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
+  nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
   for (int l = 0; l < nlev; ++l) {
     Hydro& h = nh.lev[l];
     for (int i = 0; i < NR; ++i)
@@ -64,7 +66,7 @@ int main() {
   printf("\n t(yr)    t/t_ff   M_core(Msun)  M_disk(Msun)  cons    Rout(AU)  T_disk(K)\n");
 
   double t = 0, nextlog = 0; int nstep = 0;
-  double tmax = 9.0e4 * yr;
+  double tmax = 6.2e4 * yr;                              // the LB94 SPH-initial epoch (~60 kyr)
   while (t < tmax && nstep < 400000) {
     double dt = std::min(nh.timestep(0.3), 2.0e-3 * t_ff);
     nh.step(dt); t += dt; ++nstep;
