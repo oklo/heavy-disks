@@ -25,6 +25,7 @@ struct Tree {
     int pidx;                    // particle index if a single-particle leaf, else -1
   };
   std::vector<Node> nodes;
+  std::vector<int> idx, scratch;     // reused index buffers for the in-place build
   int root = -1;
 
   void build() {
@@ -39,34 +40,44 @@ struct Tree {
     }
     double cx = 0.5 * (lo[0] + hi[0]), cy = 0.5 * (lo[1] + hi[1]), cz = 0.5 * (lo[2] + hi[2]);
     double half = 0.5 * std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-30}) * 1.0001;
-    std::vector<int> idx(n);
+    idx.resize(n); scratch.resize(n);
     for (int i = 0; i < n; ++i) idx[i] = i;
     nodes.reserve(2 * n);
-    root = build_node(idx, cx, cy, cz, half);
+    root = build_node(0, n, cx, cy, cz, half);
   }
 
-  int build_node(std::vector<int>& idx, double cx, double cy, double cz, double half) {
+  // build the node for particles idx[lo..hi); partition them into octants in place by a
+  // counting sort (no per-node allocations), then recurse on the contiguous sub-ranges
+  int build_node(int lo, int hi, double cx, double cy, double cz, double half) {
     int ni = nodes.size();
     nodes.emplace_back();
     Node nd{}; nd.cx = cx; nd.cy = cy; nd.cz = cz; nd.half = half; nd.pidx = -1;
     for (int k = 0; k < 8; ++k) nd.child[k] = -1;
-    if (idx.size() == 1) {
-      const Particle& q = (*P)[idx[0]];
-      nd.pidx = idx[0]; nd.mass = q.m; nd.comx = q.x; nd.comy = q.y; nd.comz = q.z; nd.hmax = q.h;
+    if (hi - lo == 1) {
+      const Particle& q = (*P)[idx[lo]];
+      nd.pidx = idx[lo]; nd.mass = q.m; nd.comx = q.x; nd.comy = q.y; nd.comz = q.z; nd.hmax = q.h;
       nodes[ni] = nd; return ni;
     }
-    std::vector<int> oct[8];
-    for (int p : idx) {
-      const Particle& q = (*P)[p];
-      int o = (q.x > cx) | ((q.y > cy) << 1) | ((q.z > cz) << 2);
-      oct[o].push_back(p);
+    int cnt[8] = {};
+    for (int k = lo; k < hi; ++k) {
+      const Particle& q = (*P)[idx[k]];
+      cnt[(q.x > cx) | ((q.y > cy) << 1) | ((q.z > cz) << 2)]++;
     }
+    int off[8], cur[8];
+    off[0] = lo; for (int o = 1; o < 8; ++o) off[o] = off[o - 1] + cnt[o - 1];
+    for (int o = 0; o < 8; ++o) cur[o] = off[o];
+    for (int k = lo; k < hi; ++k) {
+      const Particle& q = (*P)[idx[k]];
+      int o = (q.x > cx) | ((q.y > cy) << 1) | ((q.z > cz) << 2);
+      scratch[cur[o]++] = idx[k];
+    }
+    for (int k = lo; k < hi; ++k) idx[k] = scratch[k];
     double q4 = 0.5 * half;
     int children[8];
     for (int o = 0; o < 8; ++o) {
-      if (oct[o].empty()) { children[o] = -1; continue; }
+      if (cnt[o] == 0) { children[o] = -1; continue; }
       double ox = cx + ((o & 1) ? q4 : -q4), oy = cy + ((o & 2) ? q4 : -q4), oz = cz + ((o & 4) ? q4 : -q4);
-      children[o] = build_node(oct[o], ox, oy, oz, q4);   // recursion may realloc `nodes`
+      children[o] = build_node(off[o], off[o] + cnt[o], ox, oy, oz, q4);   // may realloc `nodes`
     }
     // accumulate mass, com, hmax from children (indices are realloc-safe)
     double mass = 0, mx = 0, my = 0, mz = 0, hmax = 0;

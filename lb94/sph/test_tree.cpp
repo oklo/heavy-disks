@@ -60,7 +60,7 @@ int main() {
     for (int j = 0; j < N; ++j) {
       if (j == i) continue;
       double r = std::sqrt(dist2(p[i], p[j]));
-      if (r < 2 * p[i].h || r < 2 * p[j].h) bf_set.insert(j);
+      if (r < 2 * p[i].h) bf_set.insert(j);              // gather-only (matches neighbors())
     }
     if (tree_set != bf_set) ++mism;
     ++checked;

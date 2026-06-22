@@ -63,7 +63,17 @@ struct BlockStepper {
     ti = 0;
   }
 
-  // advance to T_total (code units); cb(t) is called at multiples of out_dt
+  void rung_histogram(const std::vector<Particle>& p) const {
+    int h[64] = {};
+    for (auto& q : p) h[std::min(std::max(q.rung, 0), 63)]++;
+    printf("  rung histogram:");
+    for (int r = 0; r <= Rmax; ++r) if (h[r]) printf(" [%d]=%d", r, h[r]);
+    printf("\n");
+  }
+
+  // advance to T_total (code units); cb(t) is called at multiples of out_dt. The tree is
+  // rebuilt only when the fastest particle has drifted ~0.2 h_min since the last build (so the
+  // tree cost is set by particle displacement, not by the deep-rung sub-step count).
   template <class CB>
   void run(std::vector<Particle>& p, Tree& tree, const SPHParams& par,
            double T_total, double out_dt, CB cb) {
@@ -71,9 +81,14 @@ struct BlockStepper {
     long long ti_total = (long long)std::llround(T_total / dt_min());
     long long ti_out = 0, out_step = std::max(1LL, (long long)std::llround(out_dt / dt_min()));
     std::vector<int> active;
+    double drift_accum = 1e30;
     while (ti < ti_total) {
-      int rmax_inuse = 0;
-      for (int i = 0; i < n; ++i) rmax_inuse = std::max(rmax_inuse, p[i].rung);
+      int rmax_inuse = 0; double vmax = 0, hmin = 1e30;
+      for (int i = 0; i < n; ++i) {
+        rmax_inuse = std::max(rmax_inuse, p[i].rung);
+        double v = std::sqrt(p[i].vx * p[i].vx + p[i].vy * p[i].vy + p[i].vz * p[i].vz);
+        vmax = std::max(vmax, v); hmin = std::min(hmin, p[i].h);
+      }
       long long step = (1LL << (Rmax - rmax_inuse));
       long long ti_next = std::min(ti + step, ti_total);
       double dt_drift = (ti_next - ti) * dt_min();
@@ -82,9 +97,10 @@ struct BlockStepper {
         p[i].x += dt_drift * p[i].vx; p[i].y += dt_drift * p[i].vy; p[i].z += dt_drift * p[i].vz;
       }
       ti = ti_next;
+      drift_accum += dt_drift * vmax;
       active.clear();
       for (int i = 0; i < n; ++i) if (p[i].ti_end <= ti) active.push_back(i);
-      tree.build();
+      if (drift_accum > 0.2 * hmin) { tree.build(); drift_accum = 0; }   // displacement-based rebuild
       compute_forces_active(p, tree, par, active);
       int rfloor = rung_floor(ti);
       for (int a : active) {

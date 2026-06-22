@@ -82,9 +82,10 @@ int main(int argc, char** argv) {
   FILE* fm = fopen("lb94/sph/modes.dat", "w");
   fprintf(fm, "# t(T_unit)  |c1| |c2| |c3| |c4|\n");
   auto t0 = std::chrono::steady_clock::now();
-  BlockStepper bs; bs.dt0 = 0.05; bs.Rmax = 16;
+  BlockStepper bs; bs.dt0 = 0.05; bs.Rmax = 12;
   bs.init(p, tree, par);
   printf("block stepper: dt0=%.3f, dt_min=%.2e (Rmax=%d)\n", bs.dt0, bs.dt_min(), bs.Rmax);
+  bs.rung_histogram(p);
   auto cb = [&](double t) {
     // absorbing boundary: damp outward radial velocity beyond R_edge
     double hx = p[heavy_i].x, hy = p[heavy_i].y;
@@ -101,6 +102,15 @@ int main(int argc, char** argv) {
     double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     printf("  t=%.2f  |c1|=%.3f |c2|=%.3f |c3|=%.3f  (%.0f s)\n", t, cm[1], cm[2], cm[3], wall);
     fflush(stdout);
+    // face-on snapshot (x,y,rho in the heavy-particle frame) for overdensity maps (LB94 Fig 5)
+    static int isnap = 0;
+    char sf[64]; std::snprintf(sf, sizeof(sf), "lb94/sph/snap_%02d.dat", isnap++);
+    FILE* fs = fopen(sf, "w");
+    fprintf(fs, "# t=%.3f  x y z rho  (heavy frame)\n", t);
+    double hz = p[heavy_i].z;
+    for (auto& q : p)
+      if (!q.heavy) fprintf(fs, "%.4f %.4f %.4f %.4e\n", q.x - hx, q.y - hy, q.z - hz, q.rho);
+    fclose(fs);
   };
   bs.run(p, tree, par, t_end, 0.1, cb);
   fclose(fm);
