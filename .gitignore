@@ -36,3 +36,4 @@ lb94/sph/test_sedov3d
 lb94/sph/treesph
 lb94/sph/test_tree
 lb94/sph/ic_disk
+lb94/sph/test_block

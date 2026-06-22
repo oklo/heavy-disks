@@ -2,7 +2,7 @@
 // isothermal, self-gravitating disk + central heavy particle, with an absorbing boundary at
 // R = 230 AU, and track the azimuthal Fourier mode amplitudes |c_m|(t) (LB94 eq. 7) that
 // measure the growth of the m=1/2 spiral instabilities. Code units: L=100 AU, V=1 km/s, G=1.
-#include "integrate.hpp"
+#include "block.hpp"
 #include <cstdio>
 #include <cmath>
 #include <complex>
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
 
   SPHParams par; par.isothermal = true; par.selfgrav = true; par.N_neigh = 50;
   Tree tree; tree.P = &p; tree.theta = 0.7;
-  { SPHParams pi = par; pi.h_iter = 30; adapt_h(p, tree, pi); }   // converge h from the IC guess
+  adapt_h(p, tree, par, 30);                                      // converge h from the IC guess
   compute_forces(p, tree, par);
 
   // azimuthal Fourier amplitudes |c_m| = |sum_p m_p e^{i m phi}| / M_disk, in the heavy frame
@@ -78,17 +78,15 @@ int main(int argc, char** argv) {
   double cm0[5]; modes(cm0);
   printf("initial modes |c1..c4| = %.3f %.3f %.3f %.3f\n", cm0[1], cm0[2], cm0[3], cm0[4]);
 
-  // evolve
+  // evolve with the block-timestep integrator
   FILE* fm = fopen("lb94/sph/modes.dat", "w");
   fprintf(fm, "# t(T_unit)  |c1| |c2| |c3| |c4|\n");
-  double t = 0; int nstep = 0; double nextout = 0;
   auto t0 = std::chrono::steady_clock::now();
-  while (t < t_end && nstep < 200000) {
-    if (nstep > 0 && nstep % 50 == 0) {
-      double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-      fprintf(stderr, "  step %d  t=%.3f  (%.2f s, %.3f s/step)\n", nstep, t, wall, wall / nstep);
-    }
-    // absorbing boundary: zero the radial velocity of particles beyond R_edge
+  BlockStepper bs; bs.dt0 = 0.05; bs.Rmax = 16;
+  bs.init(p, tree, par);
+  printf("block stepper: dt0=%.3f, dt_min=%.2e (Rmax=%d)\n", bs.dt0, bs.dt_min(), bs.Rmax);
+  auto cb = [&](double t) {
+    // absorbing boundary: damp outward radial velocity beyond R_edge
     double hx = p[heavy_i].x, hy = p[heavy_i].y;
     for (auto& q : p) {
       if (q.heavy) continue;
@@ -98,16 +96,14 @@ int main(int argc, char** argv) {
         if (vr > 0) { q.vx -= vr * (q.x - hx) / R; q.vy -= vr * (q.y - hy) / R; }
       }
     }
-    double dt = timestep(p, par);
-    leapfrog_step(p, tree, par, dt); t += dt; ++nstep;
-    if (t >= nextout) {
-      double cm[5]; modes(cm);
-      fprintf(fm, "%.4f %.4f %.4f %.4f %.4f\n", t, cm[1], cm[2], cm[3], cm[4]);
-      printf("  t=%.2f  steps=%d  |c1|=%.3f |c2|=%.3f |c3|=%.3f\n", t, nstep, cm[1], cm[2], cm[3]);
-      fflush(stdout); nextout += 0.5;
-    }
-  }
+    double cm[5]; modes(cm);
+    fprintf(fm, "%.4f %.4f %.4f %.4f %.4f\n", t, cm[1], cm[2], cm[3], cm[4]); fflush(fm);
+    double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    printf("  t=%.2f  |c1|=%.3f |c2|=%.3f |c3|=%.3f  (%.0f s)\n", t, cm[1], cm[2], cm[3], wall);
+    fflush(stdout);
+  };
+  bs.run(p, tree, par, t_end, 0.1, cb);
   fclose(fm);
-  printf("done: t=%.2f T_unit, steps=%d\n", t, nstep);
+  printf("done: t=%.1f T_unit\n", t_end);
   return 0;
 }

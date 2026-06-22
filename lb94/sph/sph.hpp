@@ -19,6 +19,8 @@ struct Particle {
   double P, cs;            // pressure, sound speed
   double divv;             // velocity divergence (for the scalar AV / dh/dt)
   bool heavy = false;      // the central massive ("core") particle
+  int rung = 0;            // block-timestep rung: dt = dt0 / 2^rung
+  long long ti_end = 0;    // integer time (units of dt_min) at which this particle's step ends
 };
 
 inline double dist2(const Particle& a, const Particle& b) {
