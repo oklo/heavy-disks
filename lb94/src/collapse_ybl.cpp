@@ -72,6 +72,27 @@ int main(int argc, char** argv) {
          dRfine / AU, nlev, Rkep / AU);
   printf("\n t(yr)    t/t_ff   M_core(Msun)  M_disk(Msun)  cons    Rout(AU)  T_disk(K)\n");
 
+  // Fig 2: dump disk profiles Sigma(R), T_mid(R), j(R) at several epochs (LB94 Fig 2 is at
+  // 20 kyr).  Sigma=int rho dZ (both sides), midplane T, mass-weighted j=<A>/<rho>.
+  double cvg = kB / ((gam - 1.0) * mu * mH);
+  auto dump_profile = [&](double tnow) {
+    Hydro& f = nh.finest();
+    char fn[80]; std::snprintf(fn, sizeof(fn), "lb94/ybl_prof_%s_%02dkyr.dat", tag, (int)std::lround(tnow / yr / 1e3));
+    FILE* fpr = fopen(fn, "w");
+    fprintf(fpr, "# R(AU)  log10R(cm)  Sigma(g/cm2)  T_mid(K)  j(cm2/s)  alpha=%.3f t=%.0fyr\n", alpha, tnow / yr);
+    for (int i = 0; i < NR; ++i) {
+      double Sig = 0, colA = 0;
+      for (int j = 0; j < NZ; ++j) { Sig += f.rho[f.idx(i, j)] * f.dZ * 2.0; colA += f.A[f.idx(i, j)] * f.dZ * 2.0; }
+      double dmid = f.rho[f.idx(i, 0)];
+      double Tmid = dmid > 10.0 * rho_mean ? f.e[f.idx(i, 0)] / (dmid * cvg) : 0.0;
+      double j_sp = Sig > 0 ? colA / Sig : 0.0;
+      fprintf(fpr, "%.4e %.4f %.6e %.4e %.6e\n", f.R[i] / AU, std::log10(f.R[i]), Sig, Tmid, j_sp);
+    }
+    fclose(fpr);
+  };
+  double prof_t[] = {2.0e4 * yr, 4.0e4 * yr, 6.0e4 * yr};   // LB94 Fig 2 epoch is 20 kyr
+  int prof_i = 0, n_prof = 3;
+
   double t = 0, nextlog = 0; int nstep = 0;
   double tmax = 6.2e4 * yr;                              // the LB94 SPH-initial epoch (~60 kyr)
   while (t < tmax && nstep < 400000) {
@@ -95,6 +116,7 @@ int main(int argc, char** argv) {
       }
     }
     if (!std::isfinite(nh.finest().rho[0])) { printf("  [blowup t=%.0f yr]\n", t / yr); break; }
+    while (prof_i < n_prof && t >= prof_t[prof_i]) { dump_profile(t); ++prof_i; }
     if (t >= nextlog) {
       // disk outer radius + midplane temperature at the densest disk cell
       Hydro& f = nh.finest(); double Rout = 0, rpk = 0, Tdisk = 0;
@@ -120,21 +142,7 @@ int main(int argc, char** argv) {
     for (int j = 0; j < NZ; ++j)
       fprintf(fp, "%.4e %.4e %.6e\n", f.R[i] / AU, f.Z[j] / AU, f.rho[f.idx(i, j)]);
   fclose(fp);
-  // Fig 2: radial disk profiles on the finest grid at the final epoch -- surface density
-  // Sigma=int rho dZ (both sides), midplane T, mass-weighted specific angular momentum j=<A>/<rho>
-  char fn_prof[64]; std::snprintf(fn_prof, sizeof(fn_prof), "lb94/ybl_prof_%s.dat", tag);
-  FILE* fpr = fopen(fn_prof, "w");
-  fprintf(fpr, "# R(AU)  Sigma(g/cm2)  T_mid(K)  j(cm2/s)   alpha=%.3f t=%.0fyr\n", alpha, t / yr);
-  double cv = kB / ((gam - 1.0) * mu * mH);
-  for (int i = 0; i < NR; ++i) {
-    double Sig = 0, colA = 0;
-    for (int j = 0; j < NZ; ++j) { Sig += f.rho[f.idx(i, j)] * f.dZ * 2.0; colA += f.A[f.idx(i, j)] * f.dZ * 2.0; }
-    double dmid = f.rho[f.idx(i, 0)];
-    double Tmid = dmid > 10.0 * rho_mean ? f.e[f.idx(i, 0)] / (dmid * cv) : 0.0;
-    double j_sp = Sig > 0 ? colA / Sig : 0.0;             // <A>/<rho> = R<v_phi> (mass-weighted)
-    fprintf(fpr, "%.4e %.6e %.4e %.6e\n", f.R[i] / AU, Sig, Tmid, j_sp);
-  }
-  fclose(fpr);
+  if (prof_i < n_prof) dump_profile(t);                 // final epoch if the run ended early
   double floored = 0;
   for (auto& h : nh.lev) floored += h.dbg_mass_floored;
   printf("\nfinal: M_core=%.3f Msun (%.0f%%) at t=%.0f yr,  steps=%d\n",

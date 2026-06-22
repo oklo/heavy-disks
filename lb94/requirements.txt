@@ -1,0 +1,5 @@
+# Plotting dependencies for lb94/plot_lb94.py and lb94/plot_lb94_vs_paper.py
+# (the C++ collapse code itself has no Python dependency).
+# Install into a venv:  python3 -m venv venv && ./venv/bin/pip install -r lb94/requirements.txt
+numpy>=1.24
+matplotlib>=3.7
