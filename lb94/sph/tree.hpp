@@ -126,6 +126,26 @@ struct Tree {
       if (nd.child[o] >= 0) walk_grav(nd.child[o], i, eps, ax, ay, az);
   }
 
+  // count of particles j!=i within radius R of i (gather; used for the h iteration)
+  int gather_count(int i, double R) {
+    int cnt = 0;
+    if (root >= 0) gwalk(root, i, R, cnt);
+    return cnt;
+  }
+  void gwalk(int ni, int i, double R, int& cnt) {
+    Node& nd = nodes[ni];
+    if (nd.mass == 0.0) return;
+    double dx = (*P)[i].x - nd.cx, dy = (*P)[i].y - nd.cy, dz = (*P)[i].z - nd.cz;
+    double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (d - nd.half * 1.7320508 > R) return;          // node entirely outside R
+    if (nd.pidx >= 0) {
+      if (nd.pidx != i && std::sqrt(dist2((*P)[i], (*P)[nd.pidx])) < R) ++cnt;
+      return;
+    }
+    for (int o = 0; o < 8; ++o)
+      if (nd.child[o] >= 0) gwalk(nd.child[o], i, R, cnt);
+  }
+
   // symmetric neighbor list of i: all j with r_ij < 2 h_i OR r_ij < 2 h_j
   void neighbors(int i, std::vector<int>& out) {
     out.clear();

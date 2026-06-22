@@ -14,7 +14,8 @@ struct Particle {
   double vx, vy, vz;       // velocity
   double ax, ay, az;       // acceleration
   double m, h, rho;        // mass, smoothing length, density
-  double u, dudt;          // specific internal energy and its rate
+  double u, dudt;          // specific internal energy and its rate (adiabatic EOS)
+  double cs2_iso = 0;      // assigned isothermal sound speed^2 (locally-isothermal EOS, LB94)
   double P, cs;            // pressure, sound speed
   double divv;             // velocity divergence (for the scalar AV / dh/dt)
   bool heavy = false;      // the central massive ("core") particle
