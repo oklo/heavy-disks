@@ -34,3 +34,4 @@ lb94/sph/test_density
 lb94/sph/test_gravity
 lb94/sph/test_sedov3d
 lb94/sph/treesph
+lb94/sph/test_tree
