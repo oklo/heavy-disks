@@ -146,7 +146,9 @@ struct Tree {
       if (nd.child[o] >= 0) gwalk(nd.child[o], i, R, cnt);
   }
 
-  // symmetric neighbor list of i: all j with r_ij < 2 h_i OR r_ij < 2 h_j
+  // gather neighbor list of i: all j!=i with r_ij < 2 h_i. (The symmetrized kernel's W(.,h_j)
+  // term self-zeros beyond 2 h_j, so gather suffices for density/forces; this prunes by 2 h_i
+  // only, so a few large-h particles can't defeat the tree pruning -- O(N_neigh) per query.)
   void neighbors(int i, std::vector<int>& out) {
     out.clear();
     if (root >= 0) walk_nbr(root, i, out);
@@ -157,14 +159,11 @@ struct Tree {
     if (nd.mass == 0.0) return;
     double dx = (*P)[i].x - nd.cx, dy = (*P)[i].y - nd.cy, dz = (*P)[i].z - nd.cz;
     double d = std::sqrt(dx * dx + dy * dy + dz * dz);
-    double reach = 2.0 * std::max((*P)[i].h, nd.hmax) + nd.half * 1.7320508;  // + cell half-diagonal
+    double reach = 2.0 * (*P)[i].h + nd.half * 1.7320508;     // gather + cell half-diagonal
     if (d > reach) return;
     if (nd.pidx >= 0) {
       int j = nd.pidx;
-      if (j != i) {
-        double r = std::sqrt(dist2((*P)[i], (*P)[j]));
-        if (r < 2.0 * (*P)[i].h || r < 2.0 * (*P)[j].h) out.push_back(j);
-      }
+      if (j != i && dist2((*P)[i], (*P)[j]) < 4.0 * (*P)[i].h * (*P)[i].h) out.push_back(j);
       return;
     }
     for (int o = 0; o < 8; ++o)

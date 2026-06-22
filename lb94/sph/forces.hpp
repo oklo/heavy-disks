@@ -16,19 +16,25 @@ struct SPHParams {
   double gamma = 5.0 / 3.0;           // adiabatic index (adiabatic EOS)
   bool isothermal = false;            // true: P = rho cs2_iso (locally isothermal, LB94)
   bool selfgrav = true;               // include tree gravity
-  int N_neigh = 50, h_iter = 3;       // target neighbor number, h iterations per call
+  int N_neigh = 50, h_iter = 4;       // target neighbor number, h iterations per converged call
+  double h_tol = 0.2;                  // accept |N_i - N_neigh| < h_tol*N_neigh
 };
 
-// adaptive smoothing lengths via the gather neighbor count (HK89 eq. 2.17)
+// adaptive smoothing lengths via the gather neighbor count (HK89 eq. 2.17). Converges h_i to
+// within h_tol of the target; per-step (h changes little) a few iterations suffice.
 inline void adapt_h(std::vector<Particle>& p, Tree& tree, const SPHParams& par) {
   int n = p.size();
   for (int it = 0; it < par.h_iter; ++it) {
     tree.build();
+    int nbad = 0;
+#pragma omp parallel for reduction(+ : nbad) schedule(dynamic, 256)
     for (int i = 0; i < n; ++i) {
       int cnt = tree.gather_count(i, 2.0 * p[i].h);
+      if (std::abs(cnt - par.N_neigh) > par.h_tol * par.N_neigh) ++nbad;
       double ratio = std::cbrt((double)par.N_neigh / std::max(cnt, 1));
-      p[i].h *= 0.5 * (1.0 + std::min(std::max(ratio, 0.8), 1.25));  // clamp the step
+      p[i].h *= 0.5 * (1.0 + std::min(std::max(ratio, 0.5), 1.5));   // wider, faster step
     }
+    if (nbad == 0) break;
   }
   tree.build();   // final tree with converged h_max
 }
@@ -36,8 +42,9 @@ inline void adapt_h(std::vector<Particle>& p, Tree& tree, const SPHParams& par) 
 // symmetrized density (eq. 2.16), including the self term m_i W(0,h_i)
 inline void density(std::vector<Particle>& p, Tree& tree) {
   int n = p.size();
-  std::vector<int> nb;
+#pragma omp parallel for schedule(dynamic, 256)
   for (int i = 0; i < n; ++i) {
+    std::vector<int> nb;
     double rho = p[i].m * W(0.0, p[i].h);
     tree.neighbors(i, nb);
     for (int j : nb) {
@@ -58,8 +65,9 @@ inline void equation_of_state(std::vector<Particle>& p, const SPHParams& par) {
 // pressure-gradient + artificial-viscosity acceleration and du/dt (eqs. 2.20-2.23, 2.29)
 inline void hydro_forces(std::vector<Particle>& p, Tree& tree, const SPHParams& par) {
   int n = p.size();
-  std::vector<int> nb;
+#pragma omp parallel for schedule(dynamic, 256)
   for (int i = 0; i < n; ++i) {
+    std::vector<int> nb;
     double ax = 0, ay = 0, az = 0, dudt = 0, divv = 0;
     Particle& pi = p[i];
     double Pi_over = pi.P / (pi.rho * pi.rho);
@@ -91,6 +99,7 @@ inline void hydro_forces(std::vector<Particle>& p, Tree& tree, const SPHParams& 
     pi.dudt = dudt; pi.divv = divv / pi.rho;
   }
   if (par.selfgrav)
+#pragma omp parallel for schedule(dynamic, 256)
     for (int i = 0; i < n; ++i) {
       double gx, gy, gz; tree.accel(i, gx, gy, gz);
       p[i].ax += gx; p[i].ay += gy; p[i].az += gz;
