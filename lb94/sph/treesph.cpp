@@ -7,6 +7,7 @@
 #include <cmath>
 #include <complex>
 #include <chrono>
+#include <string>
 
 using namespace sph;
 
@@ -78,9 +79,11 @@ int main(int argc, char** argv) {
   double cm0[5]; modes(cm0);
   printf("initial modes |c1..c4| = %.3f %.3f %.3f %.3f\n", cm0[1], cm0[2], cm0[3], cm0[4]);
 
-  // evolve with the block-timestep integrator
-  FILE* fm = fopen("lb94/sph/modes.dat", "w");
-  fprintf(fm, "# t(T_unit)  |c1| |c2| |c3| |c4|\n");
+  // evolve with the block-timestep integrator; mode file tagged by N, snapshots optional
+  bool do_snap = (argc > 3 && std::string(argv[3]) == "snap");
+  char fmname[64]; std::snprintf(fmname, sizeof(fmname), "lb94/sph/modes_N%05zu.dat", p.size());
+  FILE* fm = fopen(fmname, "w");
+  fprintf(fm, "# t(T_unit)  |c1| |c2| |c3| |c4|   N=%zu\n", p.size());
   auto t0 = std::chrono::steady_clock::now();
   BlockStepper bs; bs.dt0 = 0.05; bs.Rmax = 12;
   bs.init(p, tree, par);
@@ -103,6 +106,7 @@ int main(int argc, char** argv) {
     printf("  t=%.2f  |c1|=%.3f |c2|=%.3f |c3|=%.3f  (%.0f s)\n", t, cm[1], cm[2], cm[3], wall);
     fflush(stdout);
     // face-on snapshot (x,y,rho in the heavy-particle frame) for overdensity maps (LB94 Fig 5)
+    if (!do_snap) return;
     static int isnap = 0;
     char sf[64]; std::snprintf(sf, sizeof(sf), "lb94/sph/snap_%02d.dat", isnap++);
     FILE* fs = fopen(sf, "w");
