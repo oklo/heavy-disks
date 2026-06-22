@@ -55,9 +55,15 @@ struct Hydro {
   // rho_ceiling (a resolved value, Jeans length > few cells) and the excess mass+angular
   // momentum is accreted onto the core M_c, J_c.  Avoids the under-resolved Truelove runaway.
   double R_sink = 0.0, rho_ceiling = 0.0, M_c = 0.0, J_c = 0.0, Mdot = 0.0;
+  double Mdot_smooth = 0.0, Mdot_tsmooth = 1.5e10;   // smoothed accretion rate (~500 yr) for L_acc
+  double R_star = 7.0e10;                            // protostellar radius for accretion luminosity
+  bool truelove_cap = false;                         // cap density at the local Jeans-resolved limit
+  double N_jeans = 4.0;                              // Truelove: resolve lambda_J with >= N_jeans cells
   double rho_max = 1e300;             // hard density clamp (stabilizes under-resolved coarse
                                       // overlap cells, which are overwritten by restriction)
   double vmax = 1e300;                // velocity ceiling (caps central runaway -> bounded dt)
+  double T_ceiling = 0.0;             // temperature ceiling (>0): caps thermal runaway at the
+                                      // unresolved hot center (H2 dissociation ~2000 K); 0 = off
   // radiative cooling (simplified gray): cool toward T_amb on the radiative-diffusion time,
   // suppressed by local optical depth so optically-thick regions retain compression heat.
   bool radiation = false;
@@ -163,19 +169,27 @@ struct Hydro {
   double t_drain = 0.0;               // if >0, gas within R_sink is drained onto the core on
                                       // this timescale (quiescent unresolved central object)
   void accrete(double dt) {
-    if (rho_ceiling <= 0) return;
+    if (rho_ceiling <= 0 && !truelove_cap) return;
+    double dxmin = std::min(dR, dZ);
     double dM = 0.0, dJ = 0.0;
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) {
         int c = idx(i, j);
         double vol = 2.0 * (2.0 * PI * R[i] * dR * dZ);        // full ring (mirror Z<0)
-        // (1) density cap: accrete the Truelove-unresolved excess everywhere
-        if (rho[c] > rho_ceiling) {
-          double f = rho_ceiling / rho[c];
-          dM += rho[c] * (1.0 - f) * vol; dJ += A[c] * (1.0 - f) * vol;
-          rho[c] = rho_ceiling; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f;
+        // (1) density cap at the local Truelove-resolvable limit: lambda_J = cs sqrt(pi/G rho)
+        // >= N_jeans*dx  =>  rho <= pi cs^2 / (N_jeans^2 G dx^2).  Accrete the unresolvable excess.
+        double rc = rho_ceiling;
+        if (truelove_cap && rho[c] > rho_active) {
+          double cs2_iso = Pcell(c) / vdiv(rho[c]);            // isothermal sound speed^2 = P/rho
+          double rct = PI * cs2_iso / (N_jeans * N_jeans * G * dxmin * dxmin);
+          rc = (rho_ceiling > 0) ? std::min(rho_ceiling, rct) : rct;
         }
-        // (2) central sink: within R_sink drain gas onto the core (quiets the axis region)
+        if (rc > 0 && rho[c] > rc) {
+          double f = rc / rho[c];
+          dM += rho[c] * (1.0 - f) * vol; dJ += A[c] * (1.0 - f) * vol;
+          rho[c] = rc; sR[c] *= f; sZ[c] *= f; A[c] *= f; e[c] *= f;
+        }
+        // (2) optional central drain within R_sink (off by default once the Truelove cap is on)
         if (t_drain > 0 && R_sink > 0 &&
             std::sqrt(R[i] * R[i] + Z[j] * Z[j]) < R_sink && rho[c] > rho_active) {
           double g = std::min(dt / t_drain, 1.0);
@@ -184,6 +198,7 @@ struct Hydro {
         }
       }
     M_c += dM; J_c += dJ; Mdot = dM / dt;
+    Mdot_smooth += (Mdot - Mdot_smooth) * std::min(dt / Mdot_tsmooth, 1.0);   // for L_acc
   }
 
   // van Leer 2nd-order conservative transport (R then Z), face velocities fixed per sweep
@@ -282,6 +297,10 @@ struct Hydro {
       }
       if (rho[c] < rho_active) { sR[c] = sZ[c] = A[c] = 0.0; }
       if (use_energy && e[c] < emin) e[c] = emin;
+      if (use_energy && T_ceiling > 0) {                 // thermal-runaway ceiling (hot center)
+        double emax = rho[c] * (1.380649e-16 / ((gam - 1.0) * mu_gas * 1.6726e-24)) * T_ceiling;
+        if (e[c] > emax) e[c] = emax;
+      }
       if (vmax < 1e290) {                                // velocity ceiling
         double dv = vdiv(rho[c]);
         if (std::fabs(sR[c]) > vmax * dv) sR[c] = std::copysign(vmax * dv, sR[c]);
@@ -297,21 +316,31 @@ struct Hydro {
     const double kB = 1.380649e-16, mH = 1.6726e-24, a_rad = 7.5657e-15, cl = 2.998e10;
     const double sig = a_rad * cl / 4.0, Tamb4 = Tamb * Tamb * Tamb * Tamb;
     double cv = kB / ((gam - 1.0) * mu_gas * mH);     // e = rho cv T
+    // central accretion luminosity heats the disk (LB94 model the central source explicitly via
+    // their FLD transport; here we irradiate with L_acc = G M_c Mdot / R_star, giving an
+    // equilibrium temperature T_irr(s) = (L_acc / 16 pi sigma s^2)^1/4 at distance s).
+    double Lacc = G * M_c * std::max(Mdot_smooth, 0.0) / R_star;
+    double smin2 = std::max(R_sink * R_sink, dR * dR);   // don't let T_irr diverge in the core
+    const double Tsub = 1500.0, Tsub4 = Tsub * Tsub * Tsub * Tsub;  // dust sublimation ceiling
     for (int c = 0; c < NR * NZ; ++c) {
       double d = rho[c];
       if (d < rho_active) continue;
-      double T = e[c] / (d * cv);                       // relax toward Tamb from both sides
-      double kappa = kap0 * std::max(T, Tamb) * std::max(T, Tamb);
+      int i = c / NZ, j = c % NZ;
+      double s2 = R[i] * R[i] + Z[j] * Z[j];
+      double Tirr4 = Lacc > 0 ? std::min(Lacc / (16.0 * PI * sig * std::max(s2, smin2)), Tsub4) : 0.0;
+      double Teq4 = Tamb4 + Tirr4;                      // ambient + central irradiation
+      double Teq = std::pow(Teq4, 0.25), e_eq = d * cv * Teq;
+      double T = e[c] / (d * cv);
+      double kappa = kap0 * std::max(T, Teq) * std::max(T, Teq);
       double Hj = cs_cell(c) / std::sqrt(4.0 * PI * std::max(G, 1e-30) * d);
       double tau = kappa * d * Hj;
-      double coolrate = 4.0 * kappa * d * sig * (T * T * T * T - Tamb4) / (1.0 + tau * tau);
-      double e_eq = d * cv * Tamb;
-      // relax e toward e_eq: tcool = (e-e_eq)/coolrate is positive for BOTH cooling (T>Tamb)
-      // and heating (T<Tamb), since the two factors share sign.
-      if (coolrate != 0.0) {
-        double tcool = (e[c] - e_eq) / coolrate;
+      double coolrate = 4.0 * kappa * d * sig * (T * T * T * T - Teq4) / (1.0 + tau * tau);
+      if (coolrate > 0.0) {                             // cool compression-heated gas toward Teq,
+        double tcool = (e[c] - e_eq) / coolrate;        // optical-depth-suppressed (thick stays hot)
         if (tcool > 0) e[c] = e_eq + (e[c] - e_eq) * std::exp(-dt / tcool);
       }
+      if (e[c] < e_eq) e[c] = e_eq;                     // irradiation floor: central source keeps
+                                                        // the disk warm (T_irr gradient)
     }
   }
 
@@ -325,7 +354,11 @@ struct Hydro {
     for (int i = 0; i < NR; ++i)
       for (int j = 0; j < NZ; ++j) {
         int c = idx(i, j); double d = rho[c];
+        // alpha-viscosity is a resolved-disk model: skip vacuum, the unresolved sink region,
+        // and cells at the density backstop (the capped central object, not a viscous disk)
         if (d < rho_active) continue;
+        if (R_sink > 0 && std::sqrt(R[i] * R[i] + Z[j] * Z[j]) < R_sink) continue;
+        if (rho_ceiling > 0 && d >= 0.99 * rho_ceiling) continue;
         double omega = A[c] / (d * R[i] * R[i]);
         double cs = cs_cell(c);
         // disk scale height cs/Omega, capped at R (a thin disk has H<R; uncapped it blows up

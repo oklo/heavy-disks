@@ -208,8 +208,9 @@ struct NestedHydro {
 
   void step(double dt) {
     double Mc = finest().M_c, Jc = finest().J_c;        // shared central core
+    double Md = finest().Mdot_smooth;                   // central luminosity seen by all levels
     double ms = debug_mass ? composite_mass() + Mc : 0; // before restrict/gravity/prolong
-    for (auto& h : lev) { h.M_c = Mc; h.J_c = Jc; }
+    for (auto& h : lev) { h.M_c = Mc; h.J_c = Jc; h.Mdot_smooth = Md; }
     restrict_fluid();                                   // coarse reflects fine
     solve_gravity();                                    // nested potential
     prolong_boundary();                                 // fine boundaries from parent

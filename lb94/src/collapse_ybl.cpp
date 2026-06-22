@@ -34,16 +34,17 @@ int main(int argc, char** argv) {
   nh.lev[0].closed_outer = true;        // the bound cloud cannot lose mass through the box edge
   double dRfine = nh.finest().dR;
   for (auto& h : nh.lev) {
-    h.R_sink = 7.0 * dRfine; h.rho_active = rho_mean * 1e-4;
-    h.vmax = 1.0e300;                                    // velocity ceiling OFF (test: finer grid +
-                                                         // sink should bound the center without it)
-    h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + radiative cooling
+    h.R_sink = 3.0 * dRfine; h.rho_active = rho_mean * 1e-4;   // R_sink: M_c gravity softening
+    h.R_star = 7.0e10;                                  // ~1 Rsun -> L_acc ~ 25 Lsun (LB94 value)
+    h.vmax = 1.0e7;                                      // dt safety bound on the central infall
+    h.T_ceiling = 2000.0;                                // cap thermal runaway at the hot center
+    h.use_energy = true; h.radiation = true; h.Tamb = Tgas;   // energy eq + irradiated cooling
     h.floor = rho_mean * 1e-3;                           // ~500x below cloud density: stable van Leer
-                                                         // advection (much lower -> negative-rho
-                                                         // overshoot at the steep cloud/vacuum edge)
   }
-  nh.finest().rho_ceiling = 5.0e-14;                     // Truelove-resolved on the finest grid
-  nh.finest().t_drain = 300.0 * yr;                      // drain the unresolved central object
+  nh.finest().truelove_cap = true;                       // accrete only the Jeans-UNRESOLVABLE excess
+  nh.finest().rho_ceiling = 1.0e-12;                     // absolute backstop (~first-core density):
+                                                         // the adiabatic Jeans density rises with T,
+                                                         // so cap it here to halt the central runaway
   nh.finest().alpha_visc = alpha;                        // physical alpha-viscosity in the disk
   for (int l = 0; l < nlev; ++l) {
     Hydro& h = nh.lev[l];

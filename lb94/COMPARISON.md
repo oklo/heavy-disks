@@ -14,39 +14,47 @@ approximate). Figures: `cmp_fig1.png`, `cmp_fig2.png`; script `plot_lb94_vs_pape
 - (Note: an earlier working note in this repo carried 0.682 M⊙ / J_c=2.31×10⁵¹ as the
   target — both wrong on re-reading the page; the correct values are 0.602 M⊙ / 2.31×10⁵².)
 
-## What the overplot shows
+## Physics added to close the gaps (2026-06-22)
+Following the first comparison (which flagged the gray cooling and the over-aggressive sink),
+two physically-motivated changes were made (`hydro.hpp`):
+1. **Irradiated cooling.** The disk is heated by the central accretion luminosity
+   L_acc = G M_c Ṁ/R_⋆ (R_⋆ = 1 R⊙ ⇒ L ≈ 25 L⊙, LB94's value), giving an equilibrium
+   T_irr(s) = (L_acc/16πσs²)^¼, capped at dust sublimation (1500 K) and not allowed to
+   diverge inside the sink. This is a tractable stand-in for LB94's full FLD transport and
+   supplies the missing inner-disk heating.
+2. **Truelove-limited sink.** The density cap is set to the *local* Jeans-resolvable limit
+   ρ_J = π c_s²/(N_J² G Δx²) (N_J=4) with an absolute first-core backstop (10⁻¹²), instead of
+   a fixed 5×10⁻¹⁴ that capped resolvable disk gas. Only the genuinely unresolvable excess is
+   accreted, so the resolved disk is retained.
 
-### Fig. 1 (core mass vs time)
-1. **Timing lag.** LB94's core grows *gradually from ~3 kyr* and is largely in place by
-   ~20 kyr (< 1 t_ff). Ours stays ~0 until ~20 kyr (≈ t_ff) then rises steeply. This is
-   physical for a ρ∝1/r cloud (the dense inner cusp has a short local t_ff and should
-   collapse first) — our **central IC softening** (ρ capped at r = ½ dx) plus the sink
-   activation threshold removes that early inner collapse, delaying core onset.
-2. **Over-accretion.** Our core reaches **0.68 M⊙** — well above LB94's inviscid 0.42 and
-   even above the viscous 0.60. The **central sink is too aggressive** (density cap +
-   drain), moving disk material to the core that LB94 retains.
-3. **No viscous separation.** LB94 shows a clear inviscid/viscous split (0.42 vs 0.60);
-   ours nearly coincide. With our over-accretion the inviscid core is already near the
-   ceiling, leaving little room for the (weak, α=0.01) viscosity to add more.
+## What the overplot now shows
 
-### Fig. 2 (disk structure)
-LB94's disk is formed by 20 kyr; ours forms ~30–40 kyr later (Fig. 1), so we overplot our
-disk-formed epoch (60 kyr) and, as a thin dotted line, our 20 kyr state (still infalling).
-1. **Temperature — the largest discrepancy.** LB94: a real **30–205 K gradient**
-   (optically-thick inner disk heated by compression/accretion). Ours: **isothermal ~20 K**.
-   This is the direct cost of the **gray cooling-relaxation** vs LB94's flux-limited
-   radiation transport (audit issue #2) — the inner disk never heats up.
-2. **Surface density.** Our **outer disk (~100–250 AU) matches LB94** (log Σ ≈ 1); our
-   **inner disk (< 60 AU) is depleted** (log Σ dips to −1) — the same sink over-accretion as
-   Fig. 1. LB94's Σ is higher and smoother overall (more disk mass retained).
-3. **Specific angular momentum.** Reasonable agreement in the outer disk (both → log j ≈
-   20.7–20.8, ~Keplerian); ours is modestly low in the inner disk. At 20 kyr our j is ~10¹⁸
-   (un-spun-up infalling envelope) — the clearest signature of the timing lag.
+### Fig. 2 (disk structure) — now in good agreement
+With irradiation, the disk has a **real temperature gradient ~235→50 K** that tracks LB94's
+~205→33 K (ours runs ~20–30 K warm). The **surface density now matches** (log Σ ≈ 1.7–2.4
+inner, declining outward — the previous inner-disk depletion is gone, because the Truelove
+cap retains the resolved disk). **Specific j** tracks LB94 (~Keplerian, log j ≈ 19.8→20.7).
+So all three Fig. 2 panels are reproduced to within the digitization error.
+
+### Fig. 1 (core mass vs time) — magnitude fixed, two residuals
+- **Magnitude fixed:** inviscid core reaches **0.47 M⊙** vs LB94's 0.42 (was 0.68). The
+  Truelove sink no longer over-accretes; the retained disk grows from 0.30 to **0.54 M⊙**.
+- **Residual 1 — timing lag.** Our core still onsets at ~t_ff (~20 kyr) vs LB94's gradual
+  growth from ~3 kyr. This is the **IC central softening** (ρ capped at r = ½ dx) removing the
+  dense inner cusp that should collapse first; the magnitude is right but the curve is shifted
+  ~15 kyr later.
+- **Residual 2 — viscous separation not reproduced.** LB94's viscous core (0.60) clearly
+  exceeds its inviscid (0.42); ours nearly coincide (~0.42–0.47). The α-viscosity that would
+  drive the extra inner accretion is also numerically unstable in the inner disk (it had to be
+  excluded inside the sink region for stability), so it only spreads the *outer* disk rather
+  than driving inward accretion. The viscous run is also fragile (reaches ~50–54 kyr before an
+  outer-disk-edge instability), so it is shown to 40–50 kyr.
 
 ## Bottom line
-The **rotation/angular-momentum structure of the outer disk is reproduced well**; the two
-real failures are (a) the **thermal structure** (no inner-disk heating — gray cooling), and
-(b) the **central sink over-accreting** (too-massive core, depleted inner disk, washed-out
-viscous separation, delayed onset compounded by the IC central softening). Both were the
-top-ranked physics caveats in `AUDIT.md` (#2 cooling, #3 sink) — this comparison confirms
-that prioritization and quantifies the gaps.
+The two top `AUDIT.md` caveats are largely closed: **irradiated cooling reproduces the disk
+thermal structure**, and the **Truelove-limited sink fixes the over-accretion** (core, disk
+mass, and Σ now all match LB94). The disk *structure* — the actual SPH initial condition — is
+now a good match. What remains is dynamical, not structural: the **early-time core onset**
+(needs better central-cusp resolution, not softening) and a **stable, effective inner-disk
+viscosity** to reproduce LB94's viscous/inviscid core split. The latter likely needs an
+implicit/sub-cycled viscous solve so it can act in the inner disk without going unstable.

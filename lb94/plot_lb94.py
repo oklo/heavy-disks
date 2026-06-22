@@ -34,8 +34,8 @@ def load(fn):
     m = (Sig > 0.05) & (R < 300) & (R > 30)        # resolved disk, outside the sink
     return R[m], Sig[m], T[m], j[m]
 
-Ri, Si, Ti, ji = load("lb94/ybl_prof_a0.000.dat")
-Rv, Sv, Tv, jv = load("lb94/ybl_prof_a0.010.dat")
+Ri, Si, Ti, ji = load("lb94/ybl_prof_a0.000_40kyr.dat")
+Rv, Sv, Tv, jv = load("lb94/ybl_prof_a0.010_40kyr.dat")
 
 fig, axs = plt.subplots(3, 1, figsize=(6.2, 9.2), sharex=True)
 axs[0].plot(Ri, Ti, "-", color=C_INV, lw=2, label=r"inviscid ($\alpha=0$)")

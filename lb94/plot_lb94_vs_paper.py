@@ -50,31 +50,28 @@ def load(fn):
     m = (Sig > 0.05) & (logR > 14.15) & (logR < 15.65) & (R_AU > 12)
     return logR[m], Sig[m], T[m], j[m]
 
-# this work at the disk-formed epoch (60 kyr) and at LB94's plotted time (20 kyr)
-xi6, Si6, Ti6, ji6 = load("lb94/ybl_prof_a0.000_60kyr.dat")
-xv6, Sv6, Tv6, jv6 = load("lb94/ybl_prof_a0.010_60kyr.dat")
-xi2, Si2, Ti2, ji2 = load("lb94/ybl_prof_a0.000_20kyr.dat")
+# this work with irradiated cooling + Truelove-limited sink, at 40 kyr (both runs stable and
+# disk-forming; LB94's Fig. 2 is at 20 kyr, when their disk is comparably developed).
+xi, Si, Ti, ji = load("lb94/ybl_prof_a0.000_40kyr.dat")
+xv, Sv, Tv, jv = load("lb94/ybl_prof_a0.010_40kyr.dat")
 
 fig, axs = plt.subplots(3, 1, figsize=(7, 10), sharex=True)
 # Temperature
 axs[0].plot(lb2_T_x, lb2_T_y, "s-", ms=4, color=C_LB, label="LB94 (digitized, 20 kyr)")
-axs[0].plot(xi6, Ti6, "-",  color=C_INV, lw=2, label="this work inviscid (60 kyr)")
-axs[0].plot(xv6, Tv6, "--", color=C_VIS, lw=2, label="this work viscous (60 kyr)")
-axs[0].plot(xi2, Ti2, ":",  color="#7fb3d5", lw=1.6, label="this work inviscid (20 kyr)")
+axs[0].plot(xi, Ti, "-",  color=C_INV, lw=2, label="this work inviscid (40 kyr)")
+axs[0].plot(xv, Tv, "--", color=C_VIS, lw=2, label="this work viscous (40 kyr)")
 axs[0].set_ylabel("midplane T (K)"); axs[0].set_ylim(0, 260)
 axs[0].legend(loc="upper right", frameon=False, fontsize=8)
-axs[0].set_title("LB94 Fig. 2 vs this work — disk structure")
+axs[0].set_title("LB94 Fig. 2 vs this work (irradiated cooling + Truelove sink) — disk structure")
 # log Sigma
 axs[1].plot(lb2_S_x, lb2_S_y, "s-", ms=4, color=C_LB)
-axs[1].plot(xi6, np.log10(Si6), "-",  color=C_INV, lw=2)
-axs[1].plot(xv6, np.log10(Sv6), "--", color=C_VIS, lw=2)
-axs[1].plot(xi2, np.log10(Si2), ":",  color="#7fb3d5", lw=1.6)
+axs[1].plot(xi, np.log10(Si), "-",  color=C_INV, lw=2)
+axs[1].plot(xv, np.log10(Sv), "--", color=C_VIS, lw=2)
 axs[1].set_ylabel(r"log$_{10}\,\Sigma$  (g cm$^{-2}$)"); axs[1].set_ylim(-1.5, 4)
 # log j
 axs[2].plot(lb2_j_x, lb2_j_y, "s-", ms=4, color=C_LB)
-axs[2].plot(xi6, np.log10(ji6), "-",  color=C_INV, lw=2)
-axs[2].plot(xv6, np.log10(jv6), "--", color=C_VIS, lw=2)
-axs[2].plot(xi2, np.log10(ji2), ":",  color="#7fb3d5", lw=1.6)
+axs[2].plot(xi, np.log10(ji), "-",  color=C_INV, lw=2)
+axs[2].plot(xv, np.log10(jv), "--", color=C_VIS, lw=2)
 axs[2].set_ylabel(r"log$_{10}\,j$  (cm$^2$ s$^{-1}$)"); axs[2].set_ylim(17, 21.3)
 axs[2].set_xlabel(r"log$_{10}$ R (cm)"); axs[2].set_xlim(14.15, 15.65)
 for a in axs: a.grid(alpha=0.3)
