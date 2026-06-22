@@ -91,6 +91,24 @@ int main(int argc, char** argv) {
     }
     fclose(fpr);
   };
+  // full finest-grid (R,Z) state for the 3D SPH initial condition: density, azimuthal velocity,
+  // temperature, on the (i,j) quadrant grid.  (M_c, J_c go into the central SPH particle.)
+  auto dump_grid = [&](double tnow) {
+    Hydro& f = nh.finest();
+    char fn[80]; std::snprintf(fn, sizeof(fn), "lb94/ybl_grid_%s_%02dkyr.dat", tag, (int)std::lround(tnow / yr / 1e3));
+    FILE* fg = fopen(fn, "w");
+    fprintf(fg, "# NR=%d NZ=%d dR_cm=%.6e dZ_cm=%.6e Mc_g=%.6e Jc=%.6e t_yr=%.0f alpha=%.3f\n",
+            NR, NZ, f.dR, f.dZ, f.M_c, f.J_c, tnow / yr, alpha);
+    fprintf(fg, "# R_cm  Z_cm  rho  vphi_cmps  T_K\n");
+    for (int i = 0; i < NR; ++i)
+      for (int j = 0; j < NZ; ++j) {
+        int c = f.idx(i, j); double d = f.rho[c];
+        double vphi = d > 0 ? f.A[c] / (d * f.R[i]) : 0.0;
+        double T = d > 0 ? f.e[c] / (d * cvg) : 0.0;
+        fprintf(fg, "%.6e %.6e %.6e %.6e %.4e\n", f.R[i], f.Z[j], d, vphi, T);
+      }
+    fclose(fg);
+  };
   double prof_t[] = {2.0e4 * yr, 4.0e4 * yr, 6.0e4 * yr};   // LB94 Fig 2 epoch is 20 kyr
   int prof_i = 0, n_prof = 3;
 
@@ -117,7 +135,7 @@ int main(int argc, char** argv) {
       }
     }
     if (!std::isfinite(nh.finest().rho[0])) { printf("  [blowup t=%.0f yr]\n", t / yr); break; }
-    while (prof_i < n_prof && t >= prof_t[prof_i]) { dump_profile(t); ++prof_i; }
+    while (prof_i < n_prof && t >= prof_t[prof_i]) { dump_profile(t); dump_grid(t); ++prof_i; }
     if (t >= nextlog) {
       // disk outer radius + midplane temperature at the densest disk cell
       Hydro& f = nh.finest(); double Rout = 0, rpk = 0, Tdisk = 0;
