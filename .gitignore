@@ -37,3 +37,5 @@ lb94/sph/treesph
 lb94/sph/test_tree
 lb94/sph/ic_disk
 lb94/sph/test_block
+lb94/sph/ic_quiet
+lb94/sph/quiet

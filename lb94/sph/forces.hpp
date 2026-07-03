@@ -25,6 +25,7 @@ struct SPHParams {
 // iterate h_i toward N_neigh via the gather count (HK89 eq. 2.17); a few passes suffice when
 // h is already close (per step); returns the final neighbor count
 inline int adapt_h_one(std::vector<Particle>& p, Tree& tree, const SPHParams& par, int i, int iters) {
+  if (!p[i].gas) return 0;                       // collisionless: h is a fixed softening
   int cnt = par.N_neigh;
   for (int it = 0; it < iters; ++it) {
     cnt = tree.gather_count(i, 2.0 * p[i].h);
@@ -37,9 +38,11 @@ inline int adapt_h_one(std::vector<Particle>& p, Tree& tree, const SPHParams& pa
 
 // symmetrized density of particle i (eq. 2.16), including the self term m_i W(0,h_i)
 inline void density_one(std::vector<Particle>& p, Tree& tree, int i, std::vector<int>& nb) {
+  if (!p[i].gas) { p[i].rho = p[i].m * W(0.0, p[i].h); return; }
   double rho = p[i].m * W(0.0, p[i].h);
-  tree.neighbors(i, nb);
+  tree.sym_neighbors(i, nb);                     // full symmetric pair set (exact eq 2.16)
   for (int j : nb) {
+    if (!p[j].gas) continue;                     // collisionless particles carry no SPH mass
     double r = std::sqrt(dist2(p[i], p[j]));
     rho += p[j].m * 0.5 * (W(r, p[i].h) + W(r, p[j].h));
   }
@@ -47,6 +50,7 @@ inline void density_one(std::vector<Particle>& p, Tree& tree, int i, std::vector
 }
 
 inline void eos_one(Particle& q, const SPHParams& par) {
+  if (!q.gas) { q.P = 0.0; q.cs = 0.0; return; }
   if (par.isothermal) { q.P = q.rho * q.cs2_iso; q.cs = std::sqrt(q.cs2_iso); }
   else { q.P = (par.gamma - 1.0) * q.rho * q.u; q.cs = std::sqrt(par.gamma * std::max(q.P, 0.0) / q.rho); }
 }
@@ -55,11 +59,18 @@ inline void eos_one(Particle& q, const SPHParams& par) {
 inline void hydro_one(std::vector<Particle>& p, Tree& tree, const SPHParams& par, int i,
                       std::vector<int>& nb) {
   Particle& pi = p[i];
+  if (!pi.gas) {                                 // collisionless: gravity only
+    double gx = 0, gy = 0, gz = 0;
+    if (par.selfgrav) tree.accel(i, gx, gy, gz);
+    pi.ax = gx; pi.ay = gy; pi.az = gz; pi.dudt = 0; pi.divv = 0;
+    return;
+  }
   double ax = 0, ay = 0, az = 0, dudt = 0, divv = 0;
   double Pi_over = pi.P / (pi.rho * pi.rho);
-  tree.neighbors(i, nb);
+  tree.sym_neighbors(i, nb);                     // symmetric pair set -> reciprocal forces
   for (int j : nb) {
     Particle& pj = p[j];
+    if (!pj.gas) continue;                       // no SPH coupling to collisionless particles
     double dx = pi.x - pj.x, dy = pi.y - pj.y, dz = pi.z - pj.z;
     double r2 = dx * dx + dy * dy + dz * dz, r = std::sqrt(r2);
     if (r == 0) continue;

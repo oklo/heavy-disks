@@ -120,7 +120,13 @@ struct Tree {
     double r2 = dx * dx + dy * dy + dz * dz, r = std::sqrt(r2);
     double size = 2.0 * nd.half;
     if (nd.pidx >= 0 || size < theta * r) {          // accept: leaf, or s/d < theta
-      double gf = grav_factor(r, eps);               // = [M(<r)/M]/r^3 (Newtonian for r>2eps)
+      // SYMMETRIC pair softening at leaf level: eps_ij = (h_i + h_j)/2, so the pair force
+      // is reciprocal (Newton's 3rd law).  Receiver-only softening lets pairs with very
+      // different h (the star vs inner-disk gas) pump net momentum -- an artificial m=1
+      // (dipole) driver.  Accepted internal nodes are >~2.5x their size away, where the
+      // softening never engages, so eps choice there is immaterial.
+      double e = (nd.pidx >= 0) ? 0.5 * (eps + (*P)[nd.pidx].h) : eps;
+      double gf = grav_factor(r, e);                 // = [M(<r)/M]/r^3 (Newtonian for r>2eps)
       ax += -G * nd.mass * dx * gf; ay += -G * nd.mass * dy * gf; az += -G * nd.mass * dz * gf;
       if (use_quad && nd.pidx < 0 && r > 0) {         // quadrupole correction (dr = r_i - com)
         double r5 = r2 * r2 * r, r7 = r5 * r2;
@@ -157,12 +163,41 @@ struct Tree {
       if (nd.child[o] >= 0) gwalk(nd.child[o], i, R, cnt);
   }
 
-  // gather neighbor list of i: all j!=i with r_ij < 2 h_i. (The symmetrized kernel's W(.,h_j)
-  // term self-zeros beyond 2 h_j, so gather suffices for density/forces; this prunes by 2 h_i
-  // only, so a few large-h particles can't defeat the tree pruning -- O(N_neigh) per query.)
+  // gather neighbor list of i: all j!=i with r_ij < 2 h_i. Sufficient for the h iteration
+  // (h is defined by the gather count), but NOT for forces: pairs with 2h_j > r > 2h_i are
+  // seen by i's partner only, so gather-only pair forces violate Newton's 3rd law (a net
+  // momentum pump). Forces must use sym_neighbors below.
   void neighbors(int i, std::vector<int>& out) {
     out.clear();
     if (root >= 0) walk_nbr(root, i, out);
+  }
+
+  // SYMMETRIC neighbor list: all j!=i with r_ij < 2 max(h_i, h_j). Every interacting pair
+  // appears in both members' lists, so the (identically symmetrized) pair force cancels
+  // exactly between them. Pruning uses the subtree h_max.
+  void sym_neighbors(int i, std::vector<int>& out) {
+    out.clear();
+    if (root >= 0) walk_symnbr(root, i, out);
+  }
+
+  void walk_symnbr(int ni, int i, std::vector<int>& out) {
+    Node& nd = nodes[ni];
+    if (nd.mass == 0.0) return;
+    double dx = (*P)[i].x - nd.cx, dy = (*P)[i].y - nd.cy, dz = (*P)[i].z - nd.cz;
+    double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    double reach = 2.0 * std::max((*P)[i].h, nd.hmax) + nd.half * 1.7320508;
+    if (d > reach) return;
+    if (nd.pidx >= 0) {
+      int j = nd.pidx;
+      if (j != i) {
+        double r2 = dist2((*P)[i], (*P)[j]);
+        double hm = 2.0 * std::max((*P)[i].h, (*P)[j].h);
+        if (r2 < hm * hm) out.push_back(j);
+      }
+      return;
+    }
+    for (int o = 0; o < 8; ++o)
+      if (nd.child[o] >= 0) walk_symnbr(nd.child[o], i, out);
   }
 
   void walk_nbr(int ni, int i, std::vector<int>& out) {
