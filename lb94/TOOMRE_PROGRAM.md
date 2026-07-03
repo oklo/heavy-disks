@@ -109,6 +109,28 @@ resonances — measurable only because the in-plane experiment is under control 
   thickness, taper) — every result a curve, not a single run.
 - Clock particles / reference circles in all visualizations.
 
+## 3.5 Step 0 done — the pinned basic state (fit_basic_state.py, fig_basic_state.png)
+
+    Sigma(R) = 48.4 (R/100AU)^(-2.51) exp[ -(54.2 AU / R) - (R / 267 AU)^2 ]  g/cm^2
+    c_s(R)   = 0.534 (R/100AU)^(-1/4)  km/s        (q = 1/2 fixed; T(100 AU) = 81 K)
+    M_star   = 0.340 Msun,  M_disk = 0.374 Msun  ->  M_d/M_star = 1.10
+
+- Fit window 18–280 AU (inside 18 AU is the sink cliff, whose role the SPH heavy particle
+  takes over). rms(ln Sigma) = 12% — this is the disk's real ring/bump structure, and it is
+  a *floor*: all 16 integer taper-index pairs (n,m) in {1..4}^2 fit within 0.116–0.156, so
+  **the data cannot select the taper shape**. Canonical choice (n=1, m=2) by
+  interpretability: p matches the directly measured 60–180 AU slope (2.57), R_out matches
+  the visible outer edge, Gaussian outer taper. Taper indices are therefore a *dial* for
+  the stability analysis, not a measurement.
+- **Predictions (not fitted):** self-consistent rotation curve (star + softened razor-thin
+  disk quadrature + midplane pressure term) matches the grid v_phi to **6.4% rms** with
+  thickness-mimicking softening eps = H/2 (10% if razor-thin — the thickness correction is
+  real at H/R ~ 0.25); Q(R) to **7.8% rms**, Q_min = 1.35 (grid: 1.28).
+- Honest wart: the family puts Q_min at 56 AU; the grid's is at 32 AU, sitting on the
+  19–31 AU plateau/cliff that the smooth family deliberately rounds. That plateau edge is
+  the first candidate "feature" to reintroduce as a parameterized groove later (§2 item 5).
+  Validated domain of the family: 30–220 AU.
+
 ## 4. Suggested order of attack
 
 1. Quiet-start machinery + null run (Step 2) — everything else depends on it.
