@@ -21,6 +21,8 @@ using namespace sph;
 int main(int argc, char** argv) {
   const char* icfile = (argc > 1) ? argv[1] : "lb94/sph/quiet_ic.dat";
   const double t_end = (argc > 2) ? std::atof(argv[2]) : 3.0;
+  const int m_seed = (argc > 3) ? std::atoi(argv[3]) : 0;       // 0 = unseeded control
+  const double eps_seed = (argc > 4) ? std::atof(argv[4]) : 0.0;
 
   std::vector<Particle> p;
   FILE* fp = fopen(icfile, "r");
@@ -86,7 +88,22 @@ int main(int argc, char** argv) {
   printf("post-rebalance |c1..c4| = %.2e %.2e %.2e %.2e   (seed floor)\n",
          cm0[1], cm0[2], cm0[3], cm0[4]);
 
-  FILE* fm = fopen("lb94/sph/quiet_modes.dat", "w");
+  // ---- coherent seeding: Lagrangian radial displacement R -> R (1 + eps cos(m phi)) ----
+  if (m_seed > 0 && eps_seed > 0.0) {
+    for (auto& q : p) {
+      if (!q.gas) continue;
+      double R = std::hypot(q.x, q.y), phi = std::atan2(q.y, q.x);
+      double f = 1.0 + eps_seed * std::cos(m_seed * phi);
+      q.x = R * f * std::cos(phi); q.y = R * f * std::sin(phi);   // velocities unchanged
+    }
+    modes(cm0, ph0);
+    printf("seeded m=%d at eps=%.4f -> |c1..c4| = %.2e %.2e %.2e %.2e\n",
+           m_seed, eps_seed, cm0[1], cm0[2], cm0[3], cm0[4]);
+  }
+
+  char fmname[128];
+  std::snprintf(fmname, sizeof(fmname), "lb94/sph/quiet_modes_m%d_e%.4f.dat", m_seed, eps_seed);
+  FILE* fm = fopen(fmname, "w");
   fprintf(fm, "# t  |c1| |c2| |c3| |c4|  phase1  |c1|(30-70AU) |c1|(70-120) |c1|(120-180)\n");
   auto t0 = std::chrono::steady_clock::now();
   BlockStepper bs; bs.dt0 = 0.05; bs.Rmax = 12;
